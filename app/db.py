@@ -514,7 +514,7 @@ def get_signal_outcome_summary(
     symbol: str | None = None,
 ) -> list[dict]:
     threshold = datetime.now(KST) - timedelta(days=max(days, 1))
-    conditions = ["created_at >= ?", "status = ?"]
+    conditions = ["created_at >= ?", "status = ?", "entry_price > 0", "observed_price > 0"]
     params: list[str] = [threshold.isoformat(timespec="seconds"), "CHECKED"]
     if market:
         conditions.append("market = ?")

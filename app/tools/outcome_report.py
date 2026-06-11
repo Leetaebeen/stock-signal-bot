@@ -27,6 +27,7 @@ def main() -> None:
         return
 
     print(f"성과 요약: 최근 {max(args.days, 1)}일")
+    print("기준: 진입가와 관측가가 0보다 큰 유효 기록만 집계")
     if args.market:
         print(f"시장: {args.market}")
     if args.symbol:
