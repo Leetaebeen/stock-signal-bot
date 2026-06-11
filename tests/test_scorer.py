@@ -1,7 +1,7 @@
 from app.models import MarketSnapshot
 from app.signals.filters import evaluate_candidate_filter, filter_candidates
 from app.signals.scorer import score_snapshot
-from app.signals.selector import select_strongest
+from app.signals.selector import gainer_filter_risks, select_strongest, select_top_gainer
 
 
 def test_filter_rejects_weak_us_candidate():
@@ -89,3 +89,33 @@ def test_selects_strongest_us_candidate_after_filtering():
     assert selected.snapshot.symbol == "WOLF"
     assert selected.score >= 70
     assert any("거래량 증가율" in reason for reason in selected.reasons)
+
+
+def test_selects_top_gainer_even_when_recommendation_filter_fails():
+    snapshots = [
+        MarketSnapshot(
+            symbol="COHR",
+            name="Coherent",
+            market="US",
+            price=363.78,
+            change_pct=2.54,
+            volume_ratio=3.0,
+            trading_value_krw=13_900_000_000,
+        ),
+        MarketSnapshot(
+            symbol="PPCB",
+            name="ProPhase BioPharma",
+            market="US",
+            price=5.58,
+            change_pct=313.33,
+            volume_ratio=0.73,
+            trading_value_krw=800_000_000,
+        ),
+    ]
+
+    selected = select_top_gainer(snapshots)
+
+    assert selected is not None
+    assert selected.symbol == "PPCB"
+    risks = gainer_filter_risks(selected)
+    assert risks

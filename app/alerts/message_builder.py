@@ -1,6 +1,6 @@
 from decimal import Decimal, ROUND_HALF_UP
 
-from app.models import SignalCandidate
+from app.models import MarketSnapshot, SignalCandidate
 from app.signals.trade_plan import build_trade_plan
 
 
@@ -39,6 +39,25 @@ def build_signal_message(candidate: SignalCandidate) -> str:
         "[주의 사항]\n"
         f"{risks}\n\n"
         "자동매매가 아닙니다. 주문은 직접 판단하세요."
+    )
+
+
+def build_gainer_message(snapshot: MarketSnapshot, risks: list[str]) -> str:
+    risk_text = _format_list(risks, empty="추천 필터 미통과 사유 없음")
+    return (
+        "[실시간 급등주 포착]\n"
+        "------------------------------\n"
+        f"종목명: {snapshot.name} ({snapshot.symbol})\n"
+        f"{_format_current_line(snapshot.market, snapshot.price, snapshot.change_pct)}\n"
+        f"거래량증가율: {snapshot.volume_ratio * 100:.0f}%\n"
+        f"거래대금: {_format_krw(snapshot.trading_value_krw)}\n"
+        f"{_exchange_line(snapshot.exchange)}"
+        "\n"
+        "[구분]\n"
+        "- 실제 급등주 포착입니다.\n"
+        "- 매수가/목표가/손절가가 있는 AI 추천은 별도 조건을 통과해야 보냅니다.\n\n"
+        "[추천 필터 미통과 사유]\n"
+        f"{risk_text}"
     )
 
 
@@ -145,6 +164,14 @@ def _format_price(market: str, price: float) -> str:
     if market == "US":
         return f"{_round_won(price * USD_KRW_RATE):,}원"
     return f"{price:,.0f}원"
+
+
+def _format_krw(value: float) -> str:
+    if value <= 0:
+        return "확인 실패"
+    if value >= 100_000_000:
+        return f"{value / 100_000_000:,.0f}억 원"
+    return f"{_round_won(value):,}원"
 
 
 def _format_current_line(market: str, price: float, change_pct: float) -> str:
