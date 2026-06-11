@@ -28,3 +28,5 @@ def setup_logging(log_path: str = "logs/stock_signal.log") -> None:
     )
     file_handler.setFormatter(formatter)
     root.addHandler(file_handler)
+
+    logging.getLogger("httpx").setLevel(logging.WARNING)

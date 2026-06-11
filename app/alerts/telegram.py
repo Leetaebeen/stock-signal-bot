@@ -1,4 +1,8 @@
-﻿import httpx
+import logging
+
+import httpx
+
+logger = logging.getLogger(__name__)
 
 
 class TelegramAlerter:
@@ -10,8 +14,16 @@ class TelegramAlerter:
     async def send(self, message: str) -> bool:
         if not self.enabled or not self.bot_token or not self.chat_id:
             return False
+
         url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
         async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.post(url, json={"chat_id": self.chat_id, "text": message})
-            response.raise_for_status()
+            try:
+                response = await client.post(url, json={"chat_id": self.chat_id, "text": message})
+            except httpx.HTTPError as exc:
+                logger.warning("telegram send failed transport_error=%s", exc.__class__.__name__)
+                return False
+
+        if response.status_code >= 400:
+            logger.warning("telegram send failed status_code=%s", response.status_code)
+            return False
         return True
