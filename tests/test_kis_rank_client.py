@@ -82,7 +82,10 @@ def test_rank_client_loads_ranked_us_snapshots(tmp_path):
                 json={"access_token": "sample-access-token", "token_type": "Bearer", "expires_in": 3600},
             )
         if request.url.path == "/uapi/overseas-stock/v1/ranking/volume-surge":
-            return httpx.Response(200, json={"rt_cd": "0", "output2": [{"symb": "NVDA", "name": "NVIDIA"}]})
+            return httpx.Response(
+                200,
+                json={"rt_cd": "0", "output2": [{"symb": "NVDA", "name": "NVIDIA", "n_rate": "+550.00"}]},
+            )
         if request.url.path == "/uapi/overseas-stock/v1/ranking/volume-power":
             return httpx.Response(200, json={"rt_cd": "0", "output2": [{"symb": "NVDA", "name": "NVIDIA"}]})
         if request.url.path == "/uapi/overseas-price/v1/quotations/price":
@@ -116,4 +119,5 @@ def test_rank_client_loads_ranked_us_snapshots(tmp_path):
     assert len(snapshots) == 1
     assert snapshots[0].symbol == "NVDA"
     assert snapshots[0].price == 208.86
-    assert snapshots[0].volume_ratio == 4.0
+    assert snapshots[0].volume_ratio == 5.5
+    assert snapshots[0].exchange == "NAS"

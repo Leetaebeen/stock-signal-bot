@@ -130,7 +130,10 @@ class KisClient:
     def get_overseas_price(self, symbol: str, exchange: str = "NAS", name: str | None = None) -> MarketSnapshot:
         payload = self.get_overseas_price_raw(symbol=symbol, exchange=exchange)
         output = payload.get("output") or {}
-        return _overseas_output_to_snapshot(symbol=symbol, name=name, output=output)
+        snapshot = _overseas_output_to_snapshot(symbol=symbol, exchange=exchange, name=name, output=output)
+        if snapshot.price <= 0:
+            raise RuntimeError(f"KIS overseas price returned zero price: {exchange}:{symbol}")
+        return snapshot
 
     def get_overseas_price_raw(self, symbol: str, exchange: str = "NAS") -> dict[str, Any]:
         response = self._get_with_auth_retry(
@@ -259,7 +262,12 @@ def _domestic_output_to_snapshot(symbol: str, name: str | None, output: dict[str
     )
 
 
-def _overseas_output_to_snapshot(symbol: str, name: str | None, output: dict[str, Any]) -> MarketSnapshot:
+def _overseas_output_to_snapshot(
+    symbol: str,
+    exchange: str,
+    name: str | None,
+    output: dict[str, Any],
+) -> MarketSnapshot:
     stock_name = name or output.get("name") or output.get("ename") or symbol
     price = _to_float(output.get("last"))
     change_pct = _to_float(output.get("rate"))
@@ -284,6 +292,7 @@ def _overseas_output_to_snapshot(symbol: str, name: str | None, output: dict[str
         high_price=high_price or None,
         low_price=low_price or None,
         vwap_price=vwap_price,
+        exchange=exchange,
     )
 
 

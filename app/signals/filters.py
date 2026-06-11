@@ -3,6 +3,10 @@ from dataclasses import dataclass
 from app.models import MarketSnapshot
 
 
+US_VOLUME_RATIO_MIN = 4.0
+US_VOLUME_RATIO_MAX = 20.0
+
+
 @dataclass(frozen=True)
 class FilterDecision:
     passed: bool
@@ -49,10 +53,17 @@ def _evaluate_us(snapshot: MarketSnapshot) -> FilterDecision:
     risks: list[str] = []
     blocking_risks: list[str] = []
 
-    if snapshot.price < 1:
-        blocking_risks.append("1달러 미만 저가주 제외")
+    if snapshot.price <= 0:
+        blocking_risks.append("현재가 0 이하")
     elif snapshot.price < 2:
-        risks.append("2달러 미만 저가주는 변동성 큼")
+        blocking_risks.append("2달러 미만 저가주 제외")
+
+    if US_VOLUME_RATIO_MIN <= snapshot.volume_ratio <= US_VOLUME_RATIO_MAX:
+        reasons.append("거래량 증가율 400%~2000% 구간")
+    elif snapshot.volume_ratio > US_VOLUME_RATIO_MAX:
+        blocking_risks.append("거래량 증가율 2000% 초과")
+    else:
+        blocking_risks.append("거래량 증가율 400% 미만")
 
     if snapshot.trading_value_krw >= 30_000_000_000:
         reasons.append("미장 거래대금 300억 이상")
@@ -93,4 +104,5 @@ def _append_intraday_strength(snapshot: MarketSnapshot, reasons: list[str], risk
         if snapshot.price >= snapshot.vwap_price:
             reasons.append("VWAP 위에서 유지")
         else:
-            risks.append("VWAP 아래로 이탈")
+            blocking_note = "VWAP 아래로 이탈"
+            risks.append(blocking_note)

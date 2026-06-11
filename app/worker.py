@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 from dataclasses import replace
 
@@ -213,7 +214,12 @@ async def monitor_active_signals(settings: Settings) -> None:
             if state["market"] == "KR":
                 snapshot = kis_client.get_domestic_price(state["symbol"], name=state["name"])
             else:
-                snapshot = _get_us_snapshot(kis_client, state["symbol"], state["name"])
+                snapshot = _get_us_snapshot(
+                    kis_client,
+                    state["symbol"],
+                    state["name"],
+                    exchange=_extract_snapshot_exchange(state),
+                )
         except Exception:
             logger.exception("active quote failed %s", state["symbol"])
             await asyncio.sleep(settings.kis_request_interval_seconds)
@@ -279,19 +285,45 @@ def _get_outcome_snapshot(kis_client: KisClient, outcome: dict):
     if outcome["market"] == "KR":
         return kis_client.get_domestic_price(outcome["symbol"], name=outcome["name"])
 
-    return _get_us_snapshot(kis_client, outcome["symbol"], outcome["name"])
+    return _get_us_snapshot(
+        kis_client,
+        outcome["symbol"],
+        outcome["name"],
+        exchange=_extract_snapshot_exchange(outcome),
+    )
 
 
-def _get_us_snapshot(kis_client: KisClient, symbol: str, name: str):
+def _get_us_snapshot(kis_client: KisClient, symbol: str, name: str, exchange: str | None = None):
     last_error: Exception | None = None
-    for exchange in ("NAS", "NYS", "AMS"):
+    exchanges = [exchange] if exchange else ["NAS", "NYS", "AMS"]
+    for current_exchange in exchanges:
+        if not current_exchange:
+            continue
         try:
-            return kis_client.get_overseas_price(symbol, exchange=exchange, name=name)
+            snapshot = kis_client.get_overseas_price(symbol, exchange=current_exchange, name=name)
+            if snapshot.price <= 0:
+                raise RuntimeError(f"US quote returned zero price {current_exchange}:{symbol}")
+            return snapshot
         except Exception as exc:
             last_error = exc
     if last_error:
         raise last_error
     raise RuntimeError(f"US quote failed for {symbol}")
+
+
+def _extract_snapshot_exchange(row: dict) -> str | None:
+    raw_json = row.get("raw_json")
+    if not raw_json:
+        return None
+    try:
+        payload = json.loads(raw_json)
+    except (TypeError, ValueError):
+        return None
+    snapshot = payload.get("snapshot")
+    if not isinstance(snapshot, dict):
+        return None
+    exchange = snapshot.get("exchange")
+    return str(exchange).strip().upper() if exchange else None
 
 
 async def main_loop() -> None:

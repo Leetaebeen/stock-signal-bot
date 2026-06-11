@@ -26,7 +26,7 @@ def _score_kr(snapshot: MarketSnapshot) -> SignalCandidate:
 
     if 4 <= snapshot.change_pct <= 11:
         score += 20
-        reasons.append("등락률이 단기 관심 구간에 위치")
+        reasons.append("등락률이 단기 관심 구간")
     elif 2 <= snapshot.change_pct < 4:
         score += 10
         reasons.append("초기 상승 구간")
@@ -83,21 +83,19 @@ def _score_us(snapshot: MarketSnapshot) -> SignalCandidate:
     reasons: list[str] = []
     risks: list[str] = []
 
-    if snapshot.volume_ratio >= 6:
+    if 4 <= snapshot.volume_ratio <= 20:
         score += 30
-        reasons.append("상대 거래량이 6배 이상 급증")
-    elif snapshot.volume_ratio >= 4:
-        score += 25
-        reasons.append("상대 거래량이 4배 이상 증가")
-    elif snapshot.volume_ratio >= 2.5:
-        score += 15
-        reasons.append("상대 거래량 증가")
+        reasons.append(f"거래량 증가율 {snapshot.volume_ratio * 100:.0f}%")
+    elif snapshot.volume_ratio > 20:
+        score -= 25
+        risks.append("거래량 증가율 2000% 초과로 과열 가능")
     else:
-        risks.append("상대 거래량 추가 확인 필요")
+        score -= 20
+        risks.append("거래량 증가율 400% 미만")
 
     if 3 <= snapshot.change_pct <= 12:
         score += 25
-        reasons.append("상승률이 단기 모멘텀 구간에 위치")
+        reasons.append("상승률이 단기 모멘텀 구간")
     elif 1.5 <= snapshot.change_pct < 3:
         score += 12
         reasons.append("초기 모멘텀 확인")

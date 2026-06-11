@@ -19,10 +19,10 @@ def test_filter_rejects_weak_us_candidate():
     decision = evaluate_candidate_filter(weak)
 
     assert not decision.passed
-    assert any("1달러 미만" in risk for risk in decision.risks)
+    assert any("2달러 미만" in risk for risk in decision.risks)
 
 
-def test_filter_accepts_strong_us_candidate_with_soft_risks():
+def test_filter_accepts_us_candidate_with_400_to_2000_percent_volume_increase():
     strong = MarketSnapshot(
         symbol="WOLF",
         name="Wolfspeed",
@@ -32,12 +32,31 @@ def test_filter_accepts_strong_us_candidate_with_soft_risks():
         volume_ratio=4.0,
         trading_value_krw=600_000_000,
         vwap_price=45.3,
+        exchange="NYS",
     )
 
     decision = evaluate_candidate_filter(strong)
 
     assert decision.passed
-    assert any("최소 유동성" in reason for reason in decision.reasons)
+    assert any("400%~2000%" in reason for reason in decision.reasons)
+
+
+def test_filter_rejects_us_candidate_over_2000_percent_volume_increase():
+    overheated = MarketSnapshot(
+        symbol="WHLR",
+        name="Wheeler",
+        market="US",
+        price=3.2,
+        change_pct=5.02,
+        volume_ratio=25.0,
+        trading_value_krw=600_000_000,
+        vwap_price=3.1,
+    )
+
+    decision = evaluate_candidate_filter(overheated)
+
+    assert not decision.passed
+    assert any("2000% 초과" in risk for risk in decision.risks)
 
 
 def test_selects_strongest_us_candidate_after_filtering():
@@ -69,4 +88,4 @@ def test_selects_strongest_us_candidate_after_filtering():
     assert selected is not None
     assert selected.snapshot.symbol == "WOLF"
     assert selected.score >= 70
-    assert any("상대 거래량" in reason for reason in selected.reasons)
+    assert any("거래량 증가율" in reason for reason in selected.reasons)

@@ -24,6 +24,7 @@ class MarketSnapshot:
     program_flow_score: float = 0.0
     news_score: float = 0.0
     disclosure_risk: float = 0.0
+    exchange: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

@@ -129,6 +129,7 @@ class KisRankClient:
                         volume_ratio=row["volume_ratio_proxy"],
                         news_score=max(snapshot.news_score, row["news_score_proxy"]),
                         disclosure_risk=self._sec_risk_score(symbol),
+                        exchange=exchange,
                     )
                 )
             except Exception as exc:
@@ -189,7 +190,10 @@ class KisRankClient:
             current["name"] = current["name"] or name
             current["sources"].add(source)
             current["source_score"] += max(1, self.rank_count - idx + 1)
-            current["volume_ratio_proxy"] = max(current["volume_ratio_proxy"], volume_ratio_proxy)
+            current["volume_ratio_proxy"] = max(
+                current["volume_ratio_proxy"],
+                _volume_ratio_from_rank_row(row) or volume_ratio_proxy,
+            )
             current["news_score_proxy"] = max(current["news_score_proxy"], news_score_proxy)
 
     def _get_domestic_price_with_retry(self, symbol: str, name: str) -> MarketSnapshot:
@@ -238,3 +242,16 @@ def _first_text(row: dict[str, Any], keys: list[str]) -> str:
         if value is not None and str(value).strip():
             return str(value).strip()
     return ""
+
+
+def _volume_ratio_from_rank_row(row: dict[str, Any]) -> float | None:
+    n_rate = _first_text(row, ["n_rate", "N_RATE"])
+    if not n_rate:
+        return None
+    try:
+        rate_pct = float(n_rate.replace("+", "").replace(",", ""))
+    except ValueError:
+        return None
+    if rate_pct <= 0:
+        return None
+    return rate_pct / 100
