@@ -57,7 +57,7 @@ class KisRankClient:
         self.rate_limiter.wait()
         self._merge_rank_rows(
             rows_by_symbol,
-            _extract_rows(self.kis_client.get_domestic_fluctuation_rank_raw(count=self.rank_count)),
+            _extract_rows(self._call_with_rate_retry(self.kis_client.get_domestic_fluctuation_rank_raw, count=self.rank_count)),
             source="fluctuation",
             volume_ratio_proxy=2.5,
         )
@@ -65,7 +65,7 @@ class KisRankClient:
         self.rate_limiter.wait()
         self._merge_rank_rows(
             rows_by_symbol,
-            _extract_rows(self.kis_client.get_domestic_volume_rank_raw(rank_type="1")),
+            _extract_rows(self._call_with_rate_retry(self.kis_client.get_domestic_volume_rank_raw, rank_type="1")),
             source="volume_increase",
             volume_ratio_proxy=4.0,
         )
@@ -73,7 +73,7 @@ class KisRankClient:
         self.rate_limiter.wait()
         self._merge_rank_rows(
             rows_by_symbol,
-            _extract_rows(self.kis_client.get_domestic_volume_rank_raw(rank_type="3")),
+            _extract_rows(self._call_with_rate_retry(self.kis_client.get_domestic_volume_rank_raw, rank_type="3")),
             source="trading_value",
             volume_ratio_proxy=3.0,
         )
@@ -142,7 +142,7 @@ class KisRankClient:
             self.rate_limiter.wait()
             self._merge_us_rank_rows(
                 rows_by_symbol,
-                _extract_rows(self.kis_client.get_overseas_volume_surge_raw(exchange=exchange)),
+                _extract_rows(self._call_with_rate_retry(self.kis_client.get_overseas_volume_surge_raw, exchange=exchange)),
                 source="volume_surge",
                 exchange=exchange,
                 volume_ratio_proxy=4.0,
@@ -152,7 +152,7 @@ class KisRankClient:
             self.rate_limiter.wait()
             self._merge_us_rank_rows(
                 rows_by_symbol,
-                _extract_rows(self.kis_client.get_overseas_volume_power_raw(exchange=exchange)),
+                _extract_rows(self._call_with_rate_retry(self.kis_client.get_overseas_volume_power_raw, exchange=exchange)),
                 source="volume_power",
                 exchange=exchange,
                 volume_ratio_proxy=3.0,
@@ -204,6 +204,15 @@ class KisRankClient:
                 raise
             time.sleep(max(1.2, self.rate_limiter.interval_seconds))
             return self.kis_client.get_domestic_price(symbol, name=name)
+
+    def _call_with_rate_retry(self, func, **kwargs) -> dict[str, Any]:
+        try:
+            return func(**kwargs)
+        except RuntimeError as exc:
+            if "EGW00201" not in str(exc):
+                raise
+            time.sleep(max(1.5, self.rate_limiter.interval_seconds * 2))
+            return func(**kwargs)
 
     def _risk_score(self, symbol: str) -> float:
         if not self.dart_client:
