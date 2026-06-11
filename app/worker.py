@@ -35,9 +35,10 @@ from app.disclosures.dart_client import DartClient
 from app.disclosures.sec_client import SecClient
 from app.logging_config import setup_logging
 from app.market_clock import is_kr_regular_market_open, is_us_market_open
+from app.models import MarketSnapshot
 from app.scanners.kr_scanner import scan_kr_market
 from app.scanners.us_scanner import scan_us_market
-from app.signals.filters import filter_candidates
+from app.signals.filters import filter_candidates, is_excluded_us_product
 from app.signals.scorer import score_snapshot
 from app.signals.selector import select_strongest
 from app.signals.state_machine import evaluate_signal_status
@@ -210,6 +211,17 @@ async def monitor_active_signals(settings: Settings) -> None:
     )
 
     for state in states:
+        if _active_state_is_excluded_us_product(state):
+            update_signal_state(
+                settings.sqlite_path,
+                int(state["id"]),
+                "CLEARED",
+                float(state["current_price"]),
+                float(state["last_alert_price"]),
+            )
+            logger.info("cleared excluded active signal %s:%s", state["market"], state["symbol"])
+            continue
+
         try:
             if state["market"] == "KR":
                 snapshot = kis_client.get_domestic_price(state["symbol"], name=state["name"])
@@ -324,6 +336,22 @@ def _extract_snapshot_exchange(row: dict) -> str | None:
         return None
     exchange = snapshot.get("exchange")
     return str(exchange).strip().upper() if exchange else None
+
+
+def _active_state_is_excluded_us_product(state: dict) -> bool:
+    if state.get("market") != "US":
+        return False
+    return is_excluded_us_product(
+        MarketSnapshot(
+            symbol=str(state.get("symbol") or ""),
+            name=str(state.get("name") or ""),
+            market="US",
+            price=float(state.get("current_price") or 0),
+            change_pct=0,
+            volume_ratio=0,
+            trading_value_krw=0,
+        )
+    )
 
 
 async def main_loop() -> None:

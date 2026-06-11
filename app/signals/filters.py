@@ -121,7 +121,7 @@ def _evaluate_us(snapshot: MarketSnapshot) -> FilterDecision:
     risks: list[str] = []
     blocking_risks: list[str] = []
 
-    if _is_excluded_us_product(snapshot):
+    if is_excluded_us_product(snapshot):
         blocking_risks.append("레버리지/인버스/파생형 ETF 제외")
 
     if snapshot.price <= 0:
@@ -163,7 +163,7 @@ def _evaluate_us(snapshot: MarketSnapshot) -> FilterDecision:
     return FilterDecision(passed=not blocking_risks, reasons=reasons, risks=risks)
 
 
-def _is_excluded_us_product(snapshot: MarketSnapshot) -> bool:
+def is_excluded_us_product(snapshot: MarketSnapshot) -> bool:
     symbol = snapshot.symbol.strip().upper()
     if symbol in EXCLUDED_US_SYMBOLS:
         return True

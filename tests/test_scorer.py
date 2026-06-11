@@ -1,5 +1,5 @@
 from app.models import MarketSnapshot
-from app.signals.filters import evaluate_candidate_filter, filter_candidates
+from app.signals.filters import evaluate_candidate_filter, filter_candidates, is_excluded_us_product
 from app.signals.scorer import score_snapshot
 from app.signals.selector import select_strongest
 
@@ -107,6 +107,8 @@ def test_filter_rejects_us_option_income_etf_by_symbol_and_name():
     assert not name_decision.passed
     assert any("ETF" in risk for risk in symbol_decision.risks)
     assert any("ETF" in risk for risk in name_decision.risks)
+    assert is_excluded_us_product(by_symbol)
+    assert is_excluded_us_product(by_name)
 
 
 def test_selects_strongest_us_candidate_after_filtering():
