@@ -139,6 +139,34 @@ def test_filter_rejects_us_etf_brand_names():
     assert is_excluded_us_product(spdr)
 
 
+def test_filter_rejects_us_preferred_and_closed_end_fund_names():
+    preferred = MarketSnapshot(
+        symbol="STRK",
+        name="Strategy Strike Preferred Shares",
+        market="US",
+        price=90.0,
+        change_pct=2.5,
+        volume_ratio=3.0,
+        trading_value_krw=900_000_000,
+        vwap_price=89.8,
+    )
+    closed_end_fund = MarketSnapshot(
+        symbol="RQI",
+        name="Cohen & Steers Quality Income Realty",
+        market="US",
+        price=13.0,
+        change_pct=2.5,
+        volume_ratio=3.0,
+        trading_value_krw=900_000_000,
+        vwap_price=12.8,
+    )
+
+    assert not evaluate_candidate_filter(preferred).passed
+    assert not evaluate_candidate_filter(closed_end_fund).passed
+    assert is_excluded_us_product(preferred)
+    assert is_excluded_us_product(closed_end_fund)
+
+
 def test_selects_strongest_us_candidate_after_filtering():
     weak = MarketSnapshot(
         symbol="PENNY",
