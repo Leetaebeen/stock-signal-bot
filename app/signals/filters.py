@@ -33,7 +33,7 @@ def _evaluate_kr(snapshot: MarketSnapshot) -> FilterDecision:
         risks.append("거래대금 300억 미만")
 
     if 2 <= snapshot.change_pct <= 15:
-        reasons.append("등락률이 단타 후보 구간")
+        reasons.append("등락률이 단기 후보 구간")
     elif snapshot.change_pct > 18:
         risks.append("이미 과열된 상승률")
     else:
@@ -47,25 +47,38 @@ def _evaluate_kr(snapshot: MarketSnapshot) -> FilterDecision:
 def _evaluate_us(snapshot: MarketSnapshot) -> FilterDecision:
     reasons: list[str] = []
     risks: list[str] = []
+    blocking_risks: list[str] = []
 
-    if snapshot.price < 2:
-        risks.append("저가주 리스크")
+    if snapshot.price < 1:
+        blocking_risks.append("1달러 미만 저가주 제외")
+    elif snapshot.price < 2:
+        risks.append("2달러 미만 저가주는 변동성 큼")
 
-    if snapshot.trading_value_krw >= 300_000_000_000:
-        reasons.append("거래대금 KRW 환산 3,000억 이상")
+    if snapshot.trading_value_krw >= 30_000_000_000:
+        reasons.append("미장 거래대금 300억 이상")
+    elif snapshot.trading_value_krw >= 5_000_000_000:
+        reasons.append("미장 거래대금 50억 이상")
+    elif snapshot.trading_value_krw >= 500_000_000:
+        reasons.append("미장 최소 유동성 통과")
     else:
-        risks.append("미장 유동성 조건 미충족")
+        blocking_risks.append("미장 거래대금 5억 미만")
 
-    if 1.5 <= snapshot.change_pct <= 12:
-        reasons.append("등락률이 단기 모멘텀 구간")
-    elif snapshot.change_pct > 18:
-        risks.append("이미 과열된 상승률")
+    if 3 <= snapshot.change_pct <= 12:
+        reasons.append("상승률이 단기 모멘텀 구간")
+    elif 1.5 <= snapshot.change_pct < 3:
+        reasons.append("초기 상승 모멘텀")
+    elif 12 < snapshot.change_pct <= 25:
+        reasons.append("강한 급등 모멘텀")
+        risks.append("이미 크게 오른 구간이라 추격 주의")
+    elif snapshot.change_pct > 25:
+        blocking_risks.append("25% 초과 급등주는 추격 제외")
     else:
-        risks.append("등락률 조건 미충족")
+        blocking_risks.append("등락률 조건 미충족")
 
     _append_intraday_strength(snapshot, reasons, risks)
+    risks.extend(blocking_risks)
 
-    return FilterDecision(passed=not risks, reasons=reasons, risks=risks)
+    return FilterDecision(passed=not blocking_risks, reasons=reasons, risks=risks)
 
 
 def _append_intraday_strength(snapshot: MarketSnapshot, reasons: list[str], risks: list[str]) -> None:

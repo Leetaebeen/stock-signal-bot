@@ -32,6 +32,7 @@ def main() -> None:
     print("")
     print("runtime:")
     print(f"- market_mode={settings.market_mode}")
+    print(f"- enabled_markets={settings.enabled_markets}")
     print(f"- kis_env={settings.kis_env}")
     print(f"- scan_interval_seconds={settings.scan_interval_seconds}")
     print(f"- min_alert_score={settings.min_alert_score}")

@@ -26,7 +26,7 @@ def _score_kr(snapshot: MarketSnapshot) -> SignalCandidate:
 
     if 4 <= snapshot.change_pct <= 11:
         score += 20
-        reasons.append("등락률이 단타 관심 구간에 위치")
+        reasons.append("등락률이 단기 관심 구간에 위치")
     elif 2 <= snapshot.change_pct < 4:
         score += 10
         reasons.append("초기 상승 구간")
@@ -87,36 +87,42 @@ def _score_us(snapshot: MarketSnapshot) -> SignalCandidate:
         score += 30
         reasons.append("상대 거래량이 6배 이상 급증")
     elif snapshot.volume_ratio >= 4:
-        score += 22
+        score += 25
         reasons.append("상대 거래량이 4배 이상 증가")
     elif snapshot.volume_ratio >= 2.5:
-        score += 12
+        score += 15
         reasons.append("상대 거래량 증가")
     else:
         risks.append("상대 거래량 추가 확인 필요")
 
-    if 3 <= snapshot.change_pct <= 9:
-        score += 20
+    if 3 <= snapshot.change_pct <= 12:
+        score += 25
         reasons.append("상승률이 단기 모멘텀 구간에 위치")
     elif 1.5 <= snapshot.change_pct < 3:
-        score += 10
+        score += 12
         reasons.append("초기 모멘텀 확인")
-    elif 9 < snapshot.change_pct <= 18:
-        score += 5
-        risks.append("갭상승 또는 급등 이후 추격 주의")
+    elif 12 < snapshot.change_pct <= 25:
+        score += 10
+        risks.append("급등 이후 추격 주의")
     elif snapshot.change_pct < 0:
         score -= 20
         risks.append("당일 모멘텀 약함")
+    elif snapshot.change_pct > 25:
+        score -= 30
+        risks.append("이미 과열된 급등률")
 
-    if snapshot.trading_value_krw >= 1_500_000_000_000:
+    if snapshot.trading_value_krw >= 30_000_000_000:
         score += 25
-        reasons.append("달러 거래대금이 매우 강함")
-    elif snapshot.trading_value_krw >= 800_000_000_000:
+        reasons.append("미장 거래대금이 매우 강함")
+    elif snapshot.trading_value_krw >= 10_000_000_000:
         score += 18
-        reasons.append("달러 거래대금이 충분함")
-    elif snapshot.trading_value_krw >= 300_000_000_000:
-        score += 8
-        reasons.append("최소 유동성 조건 충족")
+        reasons.append("미장 거래대금이 충분함")
+    elif snapshot.trading_value_krw >= 5_000_000_000:
+        score += 12
+        reasons.append("미장 거래대금 조건 충족")
+    elif snapshot.trading_value_krw >= 500_000_000:
+        score += 6
+        reasons.append("미장 최소 유동성 통과")
     else:
         score -= 30
         risks.append("유동성 부족")
