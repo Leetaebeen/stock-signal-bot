@@ -26,6 +26,7 @@ from app.db import (
     init_db,
     parse_outcome_horizons,
     save_ai_analysis,
+    save_scan_rejection_report,
     save_signal,
     update_signal_outcome,
     update_signal_state,
@@ -39,6 +40,7 @@ from app.models import MarketSnapshot
 from app.scanners.kr_scanner import scan_kr_market
 from app.scanners.us_scanner import scan_us_market
 from app.signals.filters import filter_candidates, is_excluded_us_product
+from app.signals.rejection_report import build_rejection_report
 from app.signals.scorer import score_snapshot
 from app.signals.selector import select_strongest
 from app.signals.state_machine import evaluate_signal_status
@@ -80,6 +82,9 @@ async def run_once(settings: Settings, send_alert: bool = True, markets: set[str
         snapshots.extend(await scan_kr_market(client))
     if "US" in markets:
         snapshots.extend(await scan_us_market(client))
+
+    rejection_report = build_rejection_report(snapshots)
+    save_scan_rejection_report(settings.sqlite_path, ",".join(sorted(markets)), rejection_report)
 
     filtered_snapshots = filter_candidates(snapshots)
     candidates = [score_snapshot(snapshot) for snapshot in filtered_snapshots]

@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import cast
@@ -111,6 +112,26 @@ def init_db(sqlite_path: str) -> None:
             """
             CREATE INDEX IF NOT EXISTS idx_signal_outcomes_due_status
             ON signal_outcomes (status, due_at)
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS scan_rejection_reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                markets TEXT NOT NULL,
+                total_count INTEGER NOT NULL,
+                passed_count INTEGER NOT NULL,
+                rejected_count INTEGER NOT NULL,
+                risk_counts_json TEXT NOT NULL,
+                raw_json TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_scan_rejection_reports_created
+            ON scan_rejection_reports (created_at)
             """
         )
         conn.commit()
@@ -542,6 +563,62 @@ def get_signal_outcome_summary(
             params,
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def save_scan_rejection_report(sqlite_path: str, markets: str, report: dict) -> None:
+    with _connect(sqlite_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO scan_rejection_reports (
+                created_at, markets, total_count, passed_count, rejected_count,
+                risk_counts_json, raw_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                datetime.now(KST).isoformat(timespec="seconds"),
+                markets,
+                int(report.get("total") or 0),
+                int(report.get("passed_count") or 0),
+                int(report.get("rejected_count") or 0),
+                json.dumps(report.get("risk_counts") or {}, ensure_ascii=False),
+                json.dumps(report, ensure_ascii=False),
+            ),
+        )
+        conn.commit()
+
+
+def get_scan_rejection_summary(sqlite_path: str, days: int = 1) -> dict:
+    threshold = datetime.now(KST) - timedelta(days=max(days, 1))
+    with _connect(sqlite_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM scan_rejection_reports
+            WHERE created_at >= ?
+            ORDER BY created_at ASC
+            """,
+            (threshold.isoformat(timespec="seconds"),),
+        ).fetchall()
+
+    risk_counts: Counter[str] = Counter()
+    total_count = 0
+    passed_count = 0
+    rejected_count = 0
+    for row in rows:
+        total_count += int(row["total_count"])
+        passed_count += int(row["passed_count"])
+        rejected_count += int(row["rejected_count"])
+        risk_counts.update(_load_json_dict(row["risk_counts_json"]))
+
+    return {
+        "days": max(days, 1),
+        "scan_count": len(rows),
+        "total_count": total_count,
+        "passed_count": passed_count,
+        "rejected_count": rejected_count,
+        "pass_rate_pct": (passed_count / total_count) * 100 if total_count else 0,
+        "risk_counts": dict(risk_counts.most_common()),
+    }
 
 
 def get_training_dataset_rows(
