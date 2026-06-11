@@ -111,6 +111,34 @@ def test_filter_rejects_us_option_income_etf_by_symbol_and_name():
     assert is_excluded_us_product(by_name)
 
 
+def test_filter_rejects_us_etf_brand_names():
+    ishares = MarketSnapshot(
+        symbol="ECH",
+        name="iShares MSCI Chile Capped",
+        market="US",
+        price=32.0,
+        change_pct=2.5,
+        volume_ratio=3.0,
+        trading_value_krw=900_000_000,
+        vwap_price=31.8,
+    )
+    spdr = MarketSnapshot(
+        symbol="TFI",
+        name="SPDR Nuveen Bloomberg Barclays Municipal Bond",
+        market="US",
+        price=48.0,
+        change_pct=2.5,
+        volume_ratio=3.0,
+        trading_value_krw=900_000_000,
+        vwap_price=47.8,
+    )
+
+    assert not evaluate_candidate_filter(ishares).passed
+    assert not evaluate_candidate_filter(spdr).passed
+    assert is_excluded_us_product(ishares)
+    assert is_excluded_us_product(spdr)
+
+
 def test_selects_strongest_us_candidate_after_filtering():
     weak = MarketSnapshot(
         symbol="PENNY",
