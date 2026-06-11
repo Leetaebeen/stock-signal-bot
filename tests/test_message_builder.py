@@ -1,5 +1,4 @@
 from app.alerts.message_builder import (
-    build_gainer_message,
     build_signal_message,
     build_state_stop_message,
     build_state_target_reached_message,
@@ -9,29 +8,7 @@ from app.models import MarketSnapshot
 from app.signals.scorer import score_snapshot
 
 
-def test_gainer_message_is_separate_from_ai_recommendation():
-    snapshot = MarketSnapshot(
-        symbol="PPCB",
-        name="ProPhase BioPharma",
-        market="US",
-        price=5.58,
-        change_pct=313.33,
-        volume_ratio=0.73,
-        trading_value_krw=800_000_000,
-        exchange="NAS",
-    )
-
-    message = build_gainer_message(snapshot, risks=["25% 초과 급등주는 추격 제외"])
-
-    assert "[실시간 급등주 포착]" in message
-    assert "종목명: ProPhase BioPharma (PPCB)" in message
-    assert "현재가:" in message
-    assert "거래량증가율: 73%" in message
-    assert "AI 추천은 별도 조건" in message
-    assert "25% 초과 급등주는 추격 제외" in message
-
-
-def test_signal_message_is_readable_and_uses_krw_prices():
+def test_signal_message_is_single_ai_early_momentum_alert():
     candidate = score_snapshot(
         MarketSnapshot(
             symbol="NVDA",
@@ -50,12 +27,13 @@ def test_signal_message_is_readable_and_uses_krw_prices():
 
     message = build_signal_message(candidate)
 
-    assert "[AI 종목 포착]" in message
+    assert "[AI 급등 초입 포착]" in message
     assert "종목명: NVIDIA (NVDA)" in message
     assert "매수가:" in message
     assert "현재가:" in message
     assert "목표가:" in message
     assert "손절가:" in message
+    assert "거래량증가율: 480%" in message
     assert "거래소: NAS" in message
     assert "[포착 근거]" in message
     assert "$" not in message

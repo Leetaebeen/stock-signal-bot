@@ -8,8 +8,8 @@ def test_parse_ai_analysis_reads_strict_json():
         {
           "recommendation": "BUY",
           "confidence": 82,
-          "summary": "거래대금과 VWAP 흐름이 양호합니다.",
-          "key_points": ["거래대금 강함", "VWAP 위 유지"],
+          "summary": "거래량과 VWAP 흐름이 양호합니다.",
+          "key_points": ["거래량 증가", "VWAP 위 유지"],
           "risk_notes": ["추격 매수 주의"]
         }
         """
@@ -17,7 +17,7 @@ def test_parse_ai_analysis_reads_strict_json():
 
     assert analysis.recommendation == "BUY"
     assert analysis.confidence == 82
-    assert analysis.key_points == ["거래대금 강함", "VWAP 위 유지"]
+    assert analysis.key_points == ["거래량 증가", "VWAP 위 유지"]
     assert analysis.risk_notes == ["추격 매수 주의"]
 
 
@@ -30,7 +30,7 @@ def test_extract_gemini_text_reads_candidate_parts():
                         {
                             "text": (
                                 '{"recommendation":"BUY","confidence":80,'
-                                '"summary":"양호","key_points":["거래대금"],"risk_notes":[]}'
+                                '"summary":"양호","key_points":["거래량"],"risk_notes":[]}'
                             )
                         }
                     ]

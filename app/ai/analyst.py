@@ -165,16 +165,24 @@ def _build_prompt(candidate: SignalCandidate) -> str:
         "program_flow_score": snap.program_flow_score,
         "news_score": snap.news_score,
         "disclosure_risk": snap.disclosure_risk,
+        "exchange": snap.exchange,
         "rule_score": candidate.score,
         "rule_reasons": candidate.reasons,
         "rule_risks": candidate.risks,
         "trade_plan": plan.to_dict(),
     }
     return (
-        "너는 개인 단타 알림용 리스크 검토 AI다. "
-        "아래 실시간 후보 데이터만 근거로 최종 알림 여부를 판단해라. "
-        "새로운 가격, 뉴스, 재무정보를 상상하지 마라. "
-        "매매 보장은 하지 말고, 데이터가 부족하거나 추격 위험이 크면 WATCH 또는 SKIP을 선택해라.\n\n"
+        "너는 개인용 주식 알림의 리스크 검토 AI다. "
+        "목표는 이미 크게 오른 급등주를 추격하는 것이 아니라, "
+        "거래량이 붙기 시작했고 아직 과열 전인 '급등 초입' 후보만 BUY로 판단하는 것이다. "
+        "아래 실시간 후보 데이터만 근거로 판단해라. 외부 가격, 뉴스, 재무 정보를 추정하지 마라. "
+        "매매 수익을 보장하지 말고, 데이터가 부족하거나 추격 위험이 크면 WATCH 또는 SKIP을 선택해라.\n\n"
+        "BUY 기준:\n"
+        "- 등락률이 대체로 2%~12% 범위이며 아직 과열 전일 것\n"
+        "- 거래량 증가율이 200%~2000% 범위일 것\n"
+        "- 현재가가 VWAP 위 또는 강한 지지 흐름일 것\n"
+        "- 거래대금이 너무 작지 않고 5~10% 목표를 노릴 만할 것\n"
+        "- 이미 급등 후 꺾인 종목, 저유동성 종목, 12% 초과 과열 종목은 SKIP에 가깝게 판단할 것\n\n"
         "출력은 설명 없이 JSON 객체 하나만 반환해라.\n"
         "형식:\n"
         "{"

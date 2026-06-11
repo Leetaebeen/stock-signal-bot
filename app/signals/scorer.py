@@ -52,24 +52,6 @@ def _score_kr(snapshot: MarketSnapshot) -> SignalCandidate:
 
     score += _score_intraday_strength(snapshot, reasons, risks)
 
-    if snapshot.vi_gap_pct is not None and snapshot.vi_gap_pct <= 2:
-        score += 15
-        reasons.append("상승 VI 근접")
-    elif snapshot.vi_gap_pct is not None and snapshot.vi_gap_pct <= 4:
-        score += 8
-        reasons.append("VI 접근 구간")
-
-    flow = snapshot.foreign_flow_score + snapshot.institution_flow_score + snapshot.program_flow_score
-    if flow >= 1.2:
-        score += 15
-        reasons.append("외국인/기관/프로그램 수급이 동시에 양호함")
-    elif flow >= 0.7:
-        score += 8
-        reasons.append("수급 개선 흐름")
-    elif flow < 0:
-        score -= 15
-        risks.append("수급 흐름 약함")
-
     if snapshot.disclosure_risk > 0:
         penalty = min(50, int(snapshot.disclosure_risk * 5))
         score -= penalty
@@ -83,31 +65,39 @@ def _score_us(snapshot: MarketSnapshot) -> SignalCandidate:
     reasons: list[str] = []
     risks: list[str] = []
 
-    if 4 <= snapshot.volume_ratio <= 20:
-        score += 30
+    if 4 <= snapshot.volume_ratio <= 12:
+        score += 32
         reasons.append(f"거래량 증가율 {snapshot.volume_ratio * 100:.0f}%")
+    elif 2 <= snapshot.volume_ratio < 4:
+        score += 22
+        reasons.append(f"거래량 증가율 {snapshot.volume_ratio * 100:.0f}%")
+    elif 12 < snapshot.volume_ratio <= 20:
+        score += 18
+        reasons.append(f"거래량 증가율 {snapshot.volume_ratio * 100:.0f}%")
+        risks.append("거래량이 매우 급격해 단기 과열 주의")
     elif snapshot.volume_ratio > 20:
         score -= 25
-        risks.append("거래량 증가율 2000% 초과로 과열 가능")
+        risks.append("거래량 증가율 2000% 초과")
     else:
         score -= 20
-        risks.append("거래량 증가율 400% 미만")
+        risks.append("거래량 증가율 200% 미만")
 
-    if 3 <= snapshot.change_pct <= 12:
-        score += 25
-        reasons.append("상승률이 단기 모멘텀 구간")
-    elif 1.5 <= snapshot.change_pct < 3:
+    if 3 <= snapshot.change_pct <= 8:
+        score += 28
+        reasons.append("상승률이 급등 초입 핵심 구간")
+    elif 2 <= snapshot.change_pct < 3:
+        score += 18
+        reasons.append("초기 상승 모멘텀")
+    elif 8 < snapshot.change_pct <= 12:
         score += 12
-        reasons.append("초기 모멘텀 확인")
-    elif 12 < snapshot.change_pct <= 25:
-        score += 10
-        risks.append("급등 이후 추격 주의")
+        reasons.append("강한 초입 모멘텀")
+        risks.append("이미 일부 오른 구간이라 추격 주의")
+    elif snapshot.change_pct > 12:
+        score -= 30
+        risks.append("급등 초입을 지난 상승률")
     elif snapshot.change_pct < 0:
         score -= 20
         risks.append("당일 모멘텀 약함")
-    elif snapshot.change_pct > 25:
-        score -= 30
-        risks.append("이미 과열된 급등률")
 
     if snapshot.trading_value_krw >= 30_000_000_000:
         score += 25
@@ -128,10 +118,10 @@ def _score_us(snapshot: MarketSnapshot) -> SignalCandidate:
     score += _score_intraday_strength(snapshot, reasons, risks)
 
     if snapshot.news_score >= 0.75:
-        score += 15
+        score += 12
         reasons.append("뉴스 또는 이벤트 모멘텀 강함")
     elif snapshot.news_score >= 0.4:
-        score += 8
+        score += 6
         reasons.append("확인 가능한 이벤트 모멘텀")
 
     if snapshot.disclosure_risk > 0:
@@ -162,9 +152,9 @@ def _score_intraday_strength(
 
     if snapshot.vwap_price and snapshot.vwap_price > 0:
         if snapshot.price >= snapshot.vwap_price:
-            score_delta += 15
+            score_delta += 18
             reasons.append("VWAP 위에서 유지")
         else:
-            score_delta -= 20
+            score_delta -= 30
             risks.append("VWAP 아래로 이탈")
     return score_delta

@@ -4,7 +4,6 @@ import logging
 from dataclasses import replace
 
 from app.alerts.message_builder import (
-    build_gainer_message,
     build_scan_start_message,
     build_signal_message,
     build_state_stop_message,
@@ -40,7 +39,7 @@ from app.scanners.kr_scanner import scan_kr_market
 from app.scanners.us_scanner import scan_us_market
 from app.signals.filters import filter_candidates
 from app.signals.scorer import score_snapshot
-from app.signals.selector import gainer_filter_risks, select_strongest, select_top_gainer
+from app.signals.selector import select_strongest
 from app.signals.state_machine import evaluate_signal_status
 from app.signals.trade_plan import build_trade_plan
 
@@ -80,9 +79,6 @@ async def run_once(settings: Settings, send_alert: bool = True, markets: set[str
         snapshots.extend(await scan_kr_market(client))
     if "US" in markets:
         snapshots.extend(await scan_us_market(client))
-
-    if send_alert and "US" in markets:
-        await _alert_top_gainer(settings, snapshots)
 
     filtered_snapshots = filter_candidates(snapshots)
     candidates = [score_snapshot(snapshot) for snapshot in filtered_snapshots]
@@ -199,30 +195,6 @@ async def run_once(settings: Settings, send_alert: bool = True, markets: set[str
             logger.info("signal alert skipped or disabled %s:%s", strongest.snapshot.market, strongest.snapshot.symbol)
     save_signal(settings.sqlite_path, strongest, alerted=alert_sent)
     return strongest
-
-
-async def _alert_top_gainer(settings: Settings, snapshots: list) -> None:
-    top_gainer = select_top_gainer(snapshots)
-    if top_gainer is None:
-        return
-    if was_recently_alerted(settings.sqlite_path, f"GAINER:{top_gainer.symbol}", settings.alert_cooldown_minutes):
-        return
-
-    risks = gainer_filter_risks(top_gainer)
-    alerter = TelegramAlerter(
-        settings.telegram_enabled,
-        settings.telegram_bot_token,
-        settings.telegram_chat_id,
-    )
-    alert_sent = await alerter.send(build_gainer_message(top_gainer, risks))
-    if alert_sent:
-        logger.info("gainer alert sent %s:%s change_pct=%s", top_gainer.market, top_gainer.symbol, top_gainer.change_pct)
-        gainer_snapshot = replace(top_gainer, symbol=f"GAINER:{top_gainer.symbol}")
-        save_signal(
-            settings.sqlite_path,
-            score_snapshot(gainer_snapshot),
-            alerted=True,
-        )
 
 
 async def monitor_active_signals(settings: Settings) -> None:

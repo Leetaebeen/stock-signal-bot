@@ -10,7 +10,7 @@ def build_trade_plan(candidate: SignalCandidate) -> TradePlan:
         stop_pct = 2.0
     else:
         target_pct = _us_target_pct(snapshot.change_pct)
-        stop_pct = 2.5
+        stop_pct = 3.0
 
     target_price = _round_price(snapshot.market, entry_price * (1 + target_pct / 100))
     stop_price = _round_price(snapshot.market, entry_price * (1 - stop_pct / 100))
@@ -34,10 +34,10 @@ def _kr_target_pct(change_pct: float) -> float:
 
 def _us_target_pct(change_pct: float) -> float:
     if change_pct >= 8:
-        return 2.5
+        return 5.0
     if change_pct >= 5:
-        return 3.2
-    return 4.0
+        return 6.0
+    return 8.0
 
 
 def _round_price(market: str, price: float) -> float:

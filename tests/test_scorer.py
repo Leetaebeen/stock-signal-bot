@@ -1,7 +1,7 @@
 from app.models import MarketSnapshot
 from app.signals.filters import evaluate_candidate_filter, filter_candidates
 from app.signals.scorer import score_snapshot
-from app.signals.selector import gainer_filter_risks, select_strongest, select_top_gainer
+from app.signals.selector import select_strongest
 
 
 def test_filter_rejects_weak_us_candidate():
@@ -22,14 +22,14 @@ def test_filter_rejects_weak_us_candidate():
     assert any("2달러 미만" in risk for risk in decision.risks)
 
 
-def test_filter_accepts_us_candidate_with_400_to_2000_percent_volume_increase():
+def test_filter_accepts_us_early_momentum_candidate():
     strong = MarketSnapshot(
         symbol="WOLF",
         name="Wolfspeed",
         market="US",
         price=45.6,
         change_pct=5.02,
-        volume_ratio=4.0,
+        volume_ratio=3.2,
         trading_value_krw=600_000_000,
         vwap_price=45.3,
         exchange="NYS",
@@ -38,7 +38,26 @@ def test_filter_accepts_us_candidate_with_400_to_2000_percent_volume_increase():
     decision = evaluate_candidate_filter(strong)
 
     assert decision.passed
-    assert any("400%~2000%" in reason for reason in decision.reasons)
+    assert any("200%~2000%" in reason for reason in decision.reasons)
+    assert any("급등 초입" in reason for reason in decision.reasons)
+
+
+def test_filter_rejects_already_overheated_us_candidate():
+    overheated = MarketSnapshot(
+        symbol="PPCB",
+        name="ProPhase BioPharma",
+        market="US",
+        price=5.58,
+        change_pct=313.33,
+        volume_ratio=0.73,
+        trading_value_krw=800_000_000,
+        vwap_price=5.5,
+    )
+
+    decision = evaluate_candidate_filter(overheated)
+
+    assert not decision.passed
+    assert any("12% 초과" in risk or "200% 미만" in risk for risk in decision.risks)
 
 
 def test_filter_rejects_us_candidate_over_2000_percent_volume_increase():
@@ -89,33 +108,3 @@ def test_selects_strongest_us_candidate_after_filtering():
     assert selected.snapshot.symbol == "WOLF"
     assert selected.score >= 70
     assert any("거래량 증가율" in reason for reason in selected.reasons)
-
-
-def test_selects_top_gainer_even_when_recommendation_filter_fails():
-    snapshots = [
-        MarketSnapshot(
-            symbol="COHR",
-            name="Coherent",
-            market="US",
-            price=363.78,
-            change_pct=2.54,
-            volume_ratio=3.0,
-            trading_value_krw=13_900_000_000,
-        ),
-        MarketSnapshot(
-            symbol="PPCB",
-            name="ProPhase BioPharma",
-            market="US",
-            price=5.58,
-            change_pct=313.33,
-            volume_ratio=0.73,
-            trading_value_krw=800_000_000,
-        ),
-    ]
-
-    selected = select_top_gainer(snapshots)
-
-    assert selected is not None
-    assert selected.symbol == "PPCB"
-    risks = gainer_filter_risks(selected)
-    assert risks
