@@ -10,10 +10,37 @@ US_CHANGE_PCT_MAX = 12.0
 US_MIN_TRADING_VALUE_KRW = 500_000_000
 US_MIN_PRICE = 2.0
 EXCLUDED_US_SYMBOLS = {
+    "AMDY",
+    "CONY",
+    "ARKF",
+    "ARKG",
+    "ARKK",
+    "ARKQ",
+    "ARKW",
+    "ARKX",
+    "DRIP",
+    "FNGD",
+    "FNGU",
+    "GDXD",
+    "LABD",
+    "LABU",
+    "MSOS",
+    "MSTY",
+    "PLTY",
+    "SARK",
+    "SDOW",
+    "SDS",
     "SOXL",
     "SOXS",
+    "SPXL",
+    "SPXS",
+    "SPXU",
+    "TECL",
+    "TECS",
     "TQQQ",
     "SQQQ",
+    "TNA",
+    "TZA",
     "TSLL",
     "TSLS",
     "NVDL",
@@ -22,12 +49,29 @@ EXCLUDED_US_SYMBOLS = {
     "NVDY",
     "UVXY",
     "VXX",
-    "SPXU",
-    "SDOW",
-    "SDS",
     "KORU",
     "YINN",
     "YANG",
+    "GGN",
+    "YMAX",
+    "YMAG",
+    "ULTY",
+}
+EXCLUDED_US_PRODUCT_KEYWORDS = {
+    " ETF",
+    " ETN",
+    "EXCHANGE TRADED",
+    "OPTION INCOME",
+    "INCOME STRATEGY",
+    "COVERED CALL",
+    "BUYWRITE",
+    "PREMIUM INCOME",
+    "LEVERAGED",
+    "INVERSE",
+    "ULTRAPRO",
+    "2X",
+    "3X",
+    "YIELDMAX",
 }
 
 
@@ -77,7 +121,7 @@ def _evaluate_us(snapshot: MarketSnapshot) -> FilterDecision:
     risks: list[str] = []
     blocking_risks: list[str] = []
 
-    if snapshot.symbol.upper() in EXCLUDED_US_SYMBOLS:
+    if _is_excluded_us_product(snapshot):
         blocking_risks.append("레버리지/인버스/파생형 ETF 제외")
 
     if snapshot.price <= 0:
@@ -117,6 +161,15 @@ def _evaluate_us(snapshot: MarketSnapshot) -> FilterDecision:
     risks.extend(blocking_risks)
 
     return FilterDecision(passed=not blocking_risks, reasons=reasons, risks=risks)
+
+
+def _is_excluded_us_product(snapshot: MarketSnapshot) -> bool:
+    symbol = snapshot.symbol.strip().upper()
+    if symbol in EXCLUDED_US_SYMBOLS:
+        return True
+
+    name = f" {snapshot.name.strip().upper()} "
+    return any(keyword in name for keyword in EXCLUDED_US_PRODUCT_KEYWORDS)
 
 
 def _append_intraday_strength(

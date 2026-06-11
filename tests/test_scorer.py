@@ -78,6 +78,37 @@ def test_filter_rejects_us_candidate_over_2000_percent_volume_increase():
     assert any("2000% 초과" in risk for risk in decision.risks)
 
 
+def test_filter_rejects_us_option_income_etf_by_symbol_and_name():
+    by_symbol = MarketSnapshot(
+        symbol="AMDY",
+        name="YieldMax AMD Option Income Strategy",
+        market="US",
+        price=50.7,
+        change_pct=3.16,
+        volume_ratio=3.0,
+        trading_value_krw=900_000_000,
+        vwap_price=49.8,
+    )
+    by_name = MarketSnapshot(
+        symbol="FAKE",
+        name="Example 2x Leveraged ETF",
+        market="US",
+        price=10.0,
+        change_pct=4.0,
+        volume_ratio=4.0,
+        trading_value_krw=900_000_000,
+        vwap_price=9.9,
+    )
+
+    symbol_decision = evaluate_candidate_filter(by_symbol)
+    name_decision = evaluate_candidate_filter(by_name)
+
+    assert not symbol_decision.passed
+    assert not name_decision.passed
+    assert any("ETF" in risk for risk in symbol_decision.risks)
+    assert any("ETF" in risk for risk in name_decision.risks)
+
+
 def test_selects_strongest_us_candidate_after_filtering():
     weak = MarketSnapshot(
         symbol="PENNY",
