@@ -1,16 +1,16 @@
 import asyncio
 import argparse
 
-from app.config import get_settings
+from app.config import get_settings, parse_enabled_markets
 from app.market_clock import is_kr_regular_market_open, is_us_market_open
 from app.worker import run_once
 
 
-def _open_markets() -> set[str]:
+def _open_markets(enabled_markets: set[str]) -> set[str]:
     markets = set()
-    if is_kr_regular_market_open():
+    if "KR" in enabled_markets and is_kr_regular_market_open():
         markets.add("KR")
-    if is_us_market_open():
+    if "US" in enabled_markets and is_us_market_open():
         markets.add("US")
     return markets
 
@@ -21,12 +21,14 @@ async def _main() -> None:
     args = parser.parse_args()
 
     settings = get_settings()
-    markets = _open_markets() if args.send_alert else None
+    enabled_markets = parse_enabled_markets(settings.enabled_markets)
+    markets = _open_markets(enabled_markets) if args.send_alert else enabled_markets
     if args.send_alert and not markets:
         candidate = None
     else:
         candidate = await run_once(settings, send_alert=args.send_alert, markets=markets)
     print(f"market_mode={settings.market_mode}")
+    print(f"enabled_markets={','.join(sorted(enabled_markets))}")
     print(f"send_alert={args.send_alert}")
     if args.send_alert:
         print(f"alert_markets={','.join(sorted(markets)) if markets else 'none'}")

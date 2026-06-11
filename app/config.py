@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     app_name: str = "Stock Signal Bot"
     environment: str = "local"
     market_mode: str = "kis_rank"
+    enabled_markets: str = "US"
     sqlite_path: str = "data/signals.db"
 
     scan_interval_seconds: int = 60
@@ -45,3 +46,10 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def parse_enabled_markets(value: str) -> set[str]:
+    markets = {item.strip().upper() for item in value.split(",") if item.strip()}
+    allowed = {"KR", "US"}
+    selected = markets & allowed
+    return selected or {"US"}

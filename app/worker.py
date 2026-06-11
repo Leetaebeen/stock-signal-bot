@@ -13,7 +13,7 @@ from app.ai.analyst import ai_allows_alert, analyze_candidate
 from app.alerts.telegram import TelegramAlerter
 from app.brokers.kis_client import KisClient
 from app.brokers.kis_rank_client import KisRankClient
-from app.config import Settings, get_settings
+from app.config import Settings, get_settings, parse_enabled_markets
 from app.db import (
     count_ai_analysis_today,
     create_signal_state,
@@ -72,7 +72,8 @@ async def run_once(settings: Settings, send_alert: bool = True, markets: set[str
     init_db(settings.sqlite_path)
     client = build_market_client(settings)
     snapshots = []
-    markets = markets or {"KR", "US"}
+    enabled_markets = parse_enabled_markets(settings.enabled_markets)
+    markets = (markets or enabled_markets) & enabled_markets
     if "KR" in markets:
         snapshots.extend(await scan_kr_market(client))
     if "US" in markets:
@@ -208,11 +209,11 @@ async def monitor_active_signals(settings: Settings) -> None:
     )
 
     for state in states:
-        if state["market"] != "KR":
-            continue
-
         try:
-            snapshot = kis_client.get_domestic_price(state["symbol"], name=state["name"])
+            if state["market"] == "KR":
+                snapshot = kis_client.get_domestic_price(state["symbol"], name=state["name"])
+            else:
+                snapshot = _get_us_snapshot(kis_client, state["symbol"], state["name"])
         except Exception:
             logger.exception("active quote failed %s", state["symbol"])
             await asyncio.sleep(settings.kis_request_interval_seconds)
@@ -278,15 +279,19 @@ def _get_outcome_snapshot(kis_client: KisClient, outcome: dict):
     if outcome["market"] == "KR":
         return kis_client.get_domestic_price(outcome["symbol"], name=outcome["name"])
 
+    return _get_us_snapshot(kis_client, outcome["symbol"], outcome["name"])
+
+
+def _get_us_snapshot(kis_client: KisClient, symbol: str, name: str):
     last_error: Exception | None = None
     for exchange in ("NAS", "NYS", "AMS"):
         try:
-            return kis_client.get_overseas_price(outcome["symbol"], exchange=exchange, name=outcome["name"])
+            return kis_client.get_overseas_price(symbol, exchange=exchange, name=name)
         except Exception as exc:
             last_error = exc
     if last_error:
         raise last_error
-    raise RuntimeError(f"Unsupported outcome market={outcome['market']}")
+    raise RuntimeError(f"US quote failed for {symbol}")
 
 
 async def main_loop() -> None:
@@ -298,12 +303,13 @@ async def main_loop() -> None:
         settings.telegram_bot_token,
         settings.telegram_chat_id,
     )
-    await startup_alerter.send(build_scan_start_message("국장/미장"))
+    enabled_markets = parse_enabled_markets(settings.enabled_markets)
+    await startup_alerter.send(build_scan_start_message(",".join(sorted(enabled_markets))))
     while True:
         open_markets: set[str] = set()
-        if is_kr_regular_market_open():
+        if "KR" in enabled_markets and is_kr_regular_market_open():
             open_markets.add("KR")
-        if is_us_market_open():
+        if "US" in enabled_markets and is_us_market_open():
             open_markets.add("US")
 
         if not open_markets:
