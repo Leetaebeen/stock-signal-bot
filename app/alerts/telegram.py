@@ -24,6 +24,21 @@ class TelegramAlerter:
                 return False
 
         if response.status_code >= 400:
-            logger.warning("telegram send failed status_code=%s", response.status_code)
+            logger.warning(
+                "telegram send failed status_code=%s description=%s",
+                response.status_code,
+                _telegram_error_description(response),
+            )
             return False
         return True
+
+
+def _telegram_error_description(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        return "unavailable"
+    description = payload.get("description")
+    if not isinstance(description, str):
+        return "unavailable"
+    return description[:200]

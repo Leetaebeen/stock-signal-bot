@@ -7,23 +7,23 @@ def build_scan_start_message(market_name: str) -> str:
         f"[{market_name} 감시 시작]\n"
         "AI 종목 포착을 시작합니다.\n\n"
         "강한 신호가 확인되면 최종 1개 종목만 텔레그램으로 보냅니다.\n"
-        "매매 판단과 주문은 직접 진행하세요."
+        "자동매매는 하지 않습니다. 주문은 직접 판단해서 진행하세요."
     )
 
 
 def build_signal_message(candidate: SignalCandidate) -> str:
     plan = build_trade_plan(candidate)
     snap = candidate.snapshot
-    reasons = "\n".join(f"- {reason}" for reason in candidate.reasons) or "- 추천 근거 없음"
+    reasons = "\n".join(f"- {reason}" for reason in candidate.reasons) or "- 주요 포착 근거 없음"
     risks = "\n".join(f"- {risk}" for risk in candidate.risks) or "- 현재 기준 주요 리스크 없음"
     ai_text = _format_ai_analysis(candidate)
 
     return (
-        "[AI 종목포착 시그널]\n"
+        "[AI 종목 포착 시그널]\n"
         "------------------------------\n"
         f"포착 종목명: {snap.name} ({snap.symbol})\n"
         f"적정 매수가: {_format_price(snap.market, plan.entry_price)} "
-        f"-> {plan.expected_profit_pct:.2f}% 목표\n"
+        f"-> 목표 +{plan.expected_profit_pct:.2f}%\n"
         f"포착 현재가: {_format_price(snap.market, snap.price)} "
         f"-> {snap.change_pct:+.2f}%\n"
         f"목표가: {_format_price(snap.market, plan.target_price)}\n"
