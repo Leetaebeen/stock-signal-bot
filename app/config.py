@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     kis_request_interval_seconds: float = 1.1
     kis_rank_count: int = 20
 
+    us_filter_volume_ratio_min: float = 2.0
+    us_filter_volume_ratio_max: float = 20.0
+    us_filter_change_pct_min: float = 2.0
+    us_filter_change_pct_max: float = 12.0
+    us_filter_min_trading_value_krw: float = 500_000_000
+    us_filter_min_price: float = 2.0
+
     telegram_enabled: bool = False
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None

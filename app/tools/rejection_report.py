@@ -3,6 +3,7 @@ import asyncio
 import json
 
 from app.config import get_settings, parse_enabled_markets
+from app.signals.filters import filter_config_from_settings
 from app.signals.rejection_report import RISK_LABELS, build_rejection_report
 from app.worker import build_market_client
 
@@ -26,7 +27,11 @@ async def _main() -> None:
     if "US" in markets:
         snapshots.extend(await client.get_us_snapshots())
 
-    report = build_rejection_report(snapshots, near_miss_limit=args.near_miss_limit)
+    report = build_rejection_report(
+        snapshots,
+        near_miss_limit=args.near_miss_limit,
+        filter_config=filter_config_from_settings(settings),
+    )
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return

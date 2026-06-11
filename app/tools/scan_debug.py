@@ -1,13 +1,14 @@
 import asyncio
 
 from app.config import get_settings, parse_enabled_markets
-from app.signals.filters import evaluate_candidate_filter
+from app.signals.filters import evaluate_candidate_filter, filter_config_from_settings
 from app.signals.scorer import score_snapshot
 from app.worker import build_market_client
 
 
 async def _main() -> None:
     settings = get_settings()
+    filter_config = filter_config_from_settings(settings)
     client = build_market_client(settings)
     enabled_markets = parse_enabled_markets(settings.enabled_markets)
     snapshots = []
@@ -20,7 +21,7 @@ async def _main() -> None:
     print(f"enabled_markets={','.join(sorted(enabled_markets))}")
     print(f"snapshots={len(snapshots)}")
     for snapshot in snapshots[:20]:
-        decision = evaluate_candidate_filter(snapshot)
+        decision = evaluate_candidate_filter(snapshot, filter_config)
         candidate = score_snapshot(snapshot)
         print(
             f"{snapshot.market}:{snapshot.symbol} {snapshot.name} "

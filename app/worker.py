@@ -39,7 +39,7 @@ from app.market_clock import is_kr_regular_market_open, is_us_market_open
 from app.models import MarketSnapshot
 from app.scanners.kr_scanner import scan_kr_market
 from app.scanners.us_scanner import scan_us_market
-from app.signals.filters import filter_candidates, is_excluded_us_product
+from app.signals.filters import filter_candidates, filter_config_from_settings, is_excluded_us_product
 from app.signals.rejection_report import build_rejection_report
 from app.signals.scorer import score_snapshot
 from app.signals.selector import select_strongest
@@ -83,10 +83,11 @@ async def run_once(settings: Settings, send_alert: bool = True, markets: set[str
     if "US" in markets:
         snapshots.extend(await scan_us_market(client))
 
-    rejection_report = build_rejection_report(snapshots)
+    filter_config = filter_config_from_settings(settings)
+    rejection_report = build_rejection_report(snapshots, filter_config=filter_config)
     save_scan_rejection_report(settings.sqlite_path, ",".join(sorted(markets)), rejection_report)
 
-    filtered_snapshots = filter_candidates(snapshots)
+    filtered_snapshots = filter_candidates(snapshots, filter_config)
     candidates = [score_snapshot(snapshot) for snapshot in filtered_snapshots]
     logger.info(
         "scan markets=%s candidates=%s filtered=%s scored=%s",

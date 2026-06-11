@@ -1,5 +1,5 @@
 from app.models import MarketSnapshot
-from app.signals.filters import evaluate_candidate_filter, filter_candidates, is_excluded_us_product
+from app.signals.filters import FilterConfig, evaluate_candidate_filter, filter_candidates, is_excluded_us_product
 from app.signals.scorer import score_snapshot
 from app.signals.selector import select_strongest
 
@@ -20,6 +20,34 @@ def test_filter_rejects_weak_us_candidate():
 
     assert not decision.passed
     assert any("2달러 미만" in risk for risk in decision.risks)
+
+
+def test_filter_uses_custom_us_thresholds():
+    early = MarketSnapshot(
+        symbol="EARLY",
+        name="Early Momentum",
+        market="US",
+        price=3.0,
+        change_pct=1.7,
+        volume_ratio=1.7,
+        trading_value_krw=400_000_000,
+        vwap_price=2.95,
+    )
+    strict_decision = evaluate_candidate_filter(early)
+    loose_decision = evaluate_candidate_filter(
+        early,
+        FilterConfig(
+            us_volume_ratio_min=1.5,
+            us_volume_ratio_max=20.0,
+            us_change_pct_min=1.5,
+            us_change_pct_max=12.0,
+            us_min_trading_value_krw=300_000_000,
+            us_min_price=2.0,
+        ),
+    )
+
+    assert not strict_decision.passed
+    assert loose_decision.passed
 
 
 def test_filter_accepts_us_early_momentum_candidate():

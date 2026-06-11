@@ -2,12 +2,7 @@ from collections import Counter
 
 from app.models import MarketSnapshot
 from app.signals.filters import (
-    US_CHANGE_PCT_MAX,
-    US_CHANGE_PCT_MIN,
-    US_MIN_PRICE,
-    US_MIN_TRADING_VALUE_KRW,
-    US_VOLUME_RATIO_MAX,
-    US_VOLUME_RATIO_MIN,
+    FilterConfig,
     evaluate_candidate_filter,
     is_excluded_us_product,
 )
@@ -28,15 +23,20 @@ RISK_LABELS = {
 }
 
 
-def build_rejection_report(snapshots: list[MarketSnapshot], near_miss_limit: int = 5) -> dict:
+def build_rejection_report(
+    snapshots: list[MarketSnapshot],
+    near_miss_limit: int = 5,
+    filter_config: FilterConfig | None = None,
+) -> dict:
+    filter_config = filter_config or FilterConfig()
     risk_counts: Counter[str] = Counter()
     passed = []
     rejected = []
 
     for snapshot in snapshots:
-        decision = evaluate_candidate_filter(snapshot)
+        decision = evaluate_candidate_filter(snapshot, filter_config)
         candidate = score_snapshot(snapshot)
-        categories = _risk_categories(snapshot)
+        categories = _risk_categories(snapshot, filter_config)
         if not decision.passed and not categories:
             categories = ["other"]
 
@@ -76,24 +76,24 @@ def build_rejection_report(snapshots: list[MarketSnapshot], near_miss_limit: int
     }
 
 
-def _risk_categories(snapshot: MarketSnapshot) -> list[str]:
+def _risk_categories(snapshot: MarketSnapshot, config: FilterConfig) -> list[str]:
     if snapshot.market == "KR":
         return []
 
     categories = []
     if is_excluded_us_product(snapshot):
         categories.append("excluded_product")
-    if snapshot.price <= 0 or snapshot.price < US_MIN_PRICE:
+    if snapshot.price <= 0 or snapshot.price < config.us_min_price:
         categories.append("price_too_low")
-    if snapshot.volume_ratio < US_VOLUME_RATIO_MIN:
+    if snapshot.volume_ratio < config.us_volume_ratio_min:
         categories.append("volume_too_low")
-    elif snapshot.volume_ratio > US_VOLUME_RATIO_MAX:
+    elif snapshot.volume_ratio > config.us_volume_ratio_max:
         categories.append("volume_too_high")
-    if snapshot.trading_value_krw < US_MIN_TRADING_VALUE_KRW:
+    if snapshot.trading_value_krw < config.us_min_trading_value_krw:
         categories.append("trading_value_too_low")
-    if snapshot.change_pct < US_CHANGE_PCT_MIN:
+    if snapshot.change_pct < config.us_change_pct_min:
         categories.append("change_too_low")
-    elif snapshot.change_pct > US_CHANGE_PCT_MAX:
+    elif snapshot.change_pct > config.us_change_pct_max:
         categories.append("change_too_high")
     if snapshot.vwap_price and snapshot.vwap_price > 0 and snapshot.price < snapshot.vwap_price:
         categories.append("vwap_break")

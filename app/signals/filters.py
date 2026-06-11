@@ -94,14 +94,39 @@ class FilterDecision:
     risks: list[str]
 
 
-def evaluate_candidate_filter(snapshot: MarketSnapshot) -> FilterDecision:
+@dataclass(frozen=True)
+class FilterConfig:
+    us_volume_ratio_min: float = US_VOLUME_RATIO_MIN
+    us_volume_ratio_max: float = US_VOLUME_RATIO_MAX
+    us_change_pct_min: float = US_CHANGE_PCT_MIN
+    us_change_pct_max: float = US_CHANGE_PCT_MAX
+    us_min_trading_value_krw: float = US_MIN_TRADING_VALUE_KRW
+    us_min_price: float = US_MIN_PRICE
+
+
+def filter_config_from_settings(settings) -> FilterConfig:
+    return FilterConfig(
+        us_volume_ratio_min=float(settings.us_filter_volume_ratio_min),
+        us_volume_ratio_max=float(settings.us_filter_volume_ratio_max),
+        us_change_pct_min=float(settings.us_filter_change_pct_min),
+        us_change_pct_max=float(settings.us_filter_change_pct_max),
+        us_min_trading_value_krw=float(settings.us_filter_min_trading_value_krw),
+        us_min_price=float(settings.us_filter_min_price),
+    )
+
+
+def evaluate_candidate_filter(snapshot: MarketSnapshot, config: FilterConfig | None = None) -> FilterDecision:
     if snapshot.market == "KR":
         return _evaluate_kr(snapshot)
-    return _evaluate_us(snapshot)
+    return _evaluate_us(snapshot, config or FilterConfig())
 
 
-def filter_candidates(snapshots: list[MarketSnapshot]) -> list[MarketSnapshot]:
-    return [snapshot for snapshot in snapshots if evaluate_candidate_filter(snapshot).passed]
+def filter_candidates(
+    snapshots: list[MarketSnapshot],
+    config: FilterConfig | None = None,
+) -> list[MarketSnapshot]:
+    config = config or FilterConfig()
+    return [snapshot for snapshot in snapshots if evaluate_candidate_filter(snapshot, config).passed]
 
 
 def _evaluate_kr(snapshot: MarketSnapshot) -> FilterDecision:
@@ -128,7 +153,7 @@ def _evaluate_kr(snapshot: MarketSnapshot) -> FilterDecision:
     return FilterDecision(passed=not risks, reasons=reasons, risks=risks)
 
 
-def _evaluate_us(snapshot: MarketSnapshot) -> FilterDecision:
+def _evaluate_us(snapshot: MarketSnapshot, config: FilterConfig) -> FilterDecision:
     reasons: list[str] = []
     risks: list[str] = []
     blocking_risks: list[str] = []
@@ -138,12 +163,12 @@ def _evaluate_us(snapshot: MarketSnapshot) -> FilterDecision:
 
     if snapshot.price <= 0:
         blocking_risks.append("현재가 0 이하")
-    elif snapshot.price < US_MIN_PRICE:
+    elif snapshot.price < config.us_min_price:
         blocking_risks.append("2달러 미만 저가주 제외")
 
-    if US_VOLUME_RATIO_MIN <= snapshot.volume_ratio <= US_VOLUME_RATIO_MAX:
+    if config.us_volume_ratio_min <= snapshot.volume_ratio <= config.us_volume_ratio_max:
         reasons.append("거래량 증가율 200%~2000% 구간")
-    elif snapshot.volume_ratio > US_VOLUME_RATIO_MAX:
+    elif snapshot.volume_ratio > config.us_volume_ratio_max:
         blocking_risks.append("거래량 증가율 2000% 초과")
     else:
         blocking_risks.append("거래량 증가율 200% 미만")
@@ -152,19 +177,19 @@ def _evaluate_us(snapshot: MarketSnapshot) -> FilterDecision:
         reasons.append("미장 거래대금 300억 이상")
     elif snapshot.trading_value_krw >= 5_000_000_000:
         reasons.append("미장 거래대금 50억 이상")
-    elif snapshot.trading_value_krw >= US_MIN_TRADING_VALUE_KRW:
+    elif snapshot.trading_value_krw >= config.us_min_trading_value_krw:
         reasons.append("미장 최소 유동성 통과")
     else:
         blocking_risks.append("미장 거래대금 5억 미만")
 
     if 3 <= snapshot.change_pct <= 8:
         reasons.append("상승률이 급등 초입 핵심 구간")
-    elif US_CHANGE_PCT_MIN <= snapshot.change_pct < 3:
+    elif config.us_change_pct_min <= snapshot.change_pct < 3:
         reasons.append("초기 상승 모멘텀")
-    elif 8 < snapshot.change_pct <= US_CHANGE_PCT_MAX:
+    elif 8 < snapshot.change_pct <= config.us_change_pct_max:
         reasons.append("강한 초입 모멘텀")
         risks.append("이미 일부 오른 구간이라 추격 주의")
-    elif snapshot.change_pct > US_CHANGE_PCT_MAX:
+    elif snapshot.change_pct > config.us_change_pct_max:
         blocking_risks.append("12% 초과 상승은 급등 초입 제외")
     else:
         blocking_risks.append("등락률 2% 미만")
