@@ -1,5 +1,10 @@
+from decimal import Decimal, ROUND_HALF_UP
+
 from app.models import SignalCandidate
 from app.signals.trade_plan import build_trade_plan
+
+
+USD_KRW_RATE = 1350.0
 
 
 def build_scan_start_message(market_name: str) -> str:
@@ -27,7 +32,7 @@ def build_signal_message(candidate: SignalCandidate) -> str:
         f"포착 현재가: {_format_price(snap.market, snap.price)} "
         f"-> {snap.change_pct:+.2f}%\n"
         f"목표가: {_format_price(snap.market, plan.target_price)}\n"
-        f"손절 기준: {_format_price(snap.market, plan.stop_price)} "
+        f"손절가: {_format_price(snap.market, plan.stop_price)} "
         f"(-{plan.stop_loss_pct:.1f}%)\n"
         f"신호 점수: {candidate.score}점\n\n"
         f"{ai_text}"
@@ -49,7 +54,8 @@ def build_uptrend_message(candidate: SignalCandidate, previous_price: float) -> 
         f"현재가: {_format_price(snap.market, snap.price)} "
         f"-> {snap.change_pct:+.2f}%\n"
         f"추가 상승률: {move_pct:+.2f}%\n"
-        f"목표가: {_format_price(snap.market, plan.target_price)}"
+        f"목표가: {_format_price(snap.market, plan.target_price)}\n"
+        f"손절가: {_format_price(snap.market, plan.stop_price)}"
     )
 
 
@@ -62,7 +68,7 @@ def build_target_reached_message(candidate: SignalCandidate) -> str:
         f"종목명: {snap.name} ({snap.symbol})\n"
         f"현재가: {_format_price(snap.market, snap.price)} "
         f"-> {snap.change_pct:+.2f}%\n"
-        f"적정 목표가 {_format_price(snap.market, plan.target_price)} 도달"
+        f"목표가 {_format_price(snap.market, plan.target_price)}에 도달했습니다."
     )
 
 
@@ -77,29 +83,32 @@ def build_state_uptrend_message(state: dict, current_price: float, change_pct: f
         f"이전 기준가: {_format_price(market, previous_price)}\n"
         f"현재가: {_format_price(market, current_price)} -> {change_pct:+.2f}%\n"
         f"추가 상승률: {move_pct:+.2f}%\n"
-        f"목표가: {_format_price(market, float(state['target_price']))}"
+        f"목표가: {_format_price(market, float(state['target_price']))}\n"
+        f"손절가: {_format_price(market, float(state['stop_price']))}"
     )
 
 
 def build_state_target_reached_message(state: dict, current_price: float, change_pct: float) -> str:
     market = state["market"]
+    target_price = float(state["target_price"])
     return (
         "[목표가 알림]\n"
         "------------------------------\n"
         f"종목명: {state['name']} ({state['symbol']})\n"
         f"현재가: {_format_price(market, current_price)} -> {change_pct:+.2f}%\n"
-        f"적정 목표가 {_format_price(market, float(state['target_price']))} 도달"
+        f"목표가 {_format_price(market, target_price)}에 도달했습니다."
     )
 
 
 def build_state_stop_message(state: dict, current_price: float, change_pct: float) -> str:
     market = state["market"]
+    stop_price = float(state["stop_price"])
     return (
-        "[손절 기준 이탈]\n"
+        "[손절가 이탈]\n"
         "------------------------------\n"
         f"종목명: {state['name']} ({state['symbol']})\n"
         f"현재가: {_format_price(market, current_price)} -> {change_pct:+.2f}%\n"
-        f"손절 기준: {_format_price(market, float(state['stop_price']))}\n"
+        f"손절가: {_format_price(market, stop_price)} 이탈\n"
         "추가 추격은 보류하고 직접 판단하세요."
     )
 
@@ -123,5 +132,9 @@ def _format_ai_analysis(candidate: SignalCandidate) -> str:
 
 def _format_price(market: str, price: float) -> str:
     if market == "US":
-        return f"${price:,.2f}"
+        return f"{_round_won(price * USD_KRW_RATE):,}원"
     return f"{price:,.0f}원"
+
+
+def _round_won(value: float) -> int:
+    return int(Decimal(str(value)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
