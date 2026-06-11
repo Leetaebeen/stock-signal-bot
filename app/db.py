@@ -507,6 +507,43 @@ def get_signal_outcome_history(
     return [dict(row) for row in rows]
 
 
+def get_signal_outcome_summary(
+    sqlite_path: str,
+    days: int = 7,
+    market: str | None = None,
+    symbol: str | None = None,
+) -> list[dict]:
+    threshold = datetime.now(KST) - timedelta(days=max(days, 1))
+    conditions = ["created_at >= ?", "status = ?"]
+    params: list[str] = [threshold.isoformat(timespec="seconds"), "CHECKED"]
+    if market:
+        conditions.append("market = ?")
+        params.append(market)
+    if symbol:
+        conditions.append("symbol = ?")
+        params.append(symbol)
+    where = f"WHERE {' AND '.join(conditions)}"
+
+    with _connect(sqlite_path) as conn:
+        rows = conn.execute(
+            f"""
+            SELECT
+                horizon_minutes,
+                COUNT(*) AS total_count,
+                SUM(CASE WHEN pnl_pct > 0 THEN 1 ELSE 0 END) AS win_count,
+                AVG(pnl_pct) AS avg_pnl_pct,
+                MAX(pnl_pct) AS best_pnl_pct,
+                MIN(pnl_pct) AS worst_pnl_pct
+            FROM signal_outcomes
+            {where}
+            GROUP BY horizon_minutes
+            ORDER BY horizon_minutes ASC
+            """,
+            params,
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def get_ai_analysis_history(
     sqlite_path: str,
     limit: int = 20,

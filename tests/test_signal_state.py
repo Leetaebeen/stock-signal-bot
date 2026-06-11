@@ -6,6 +6,7 @@ from app.db import (
     get_active_signal_states,
     get_due_signal_outcomes,
     get_signal_outcome_history,
+    get_signal_outcome_summary,
     get_signal_state_history,
     init_db,
     parse_outcome_horizons,
@@ -111,6 +112,36 @@ def test_signal_outcomes_are_scheduled_and_updated(tmp_path):
     checked = [row for row in updated if row["status"] == "CHECKED"]
     assert len(checked) == 1
     assert checked[0]["pnl_pct"] > 0
+
+
+def test_signal_outcome_summary_groups_checked_results(tmp_path):
+    db_path = tmp_path / "signals.db"
+    init_db(str(db_path))
+    candidate = score_snapshot(
+        MarketSnapshot(
+            symbol="NVDA",
+            name="NVIDIA",
+            market="US",
+            price=100,
+            change_pct=4.5,
+            volume_ratio=5.0,
+            trading_value_krw=90_000_000_000,
+            vwap_price=99,
+        )
+    )
+    state_id = create_signal_state(str(db_path), candidate, build_trade_plan(candidate))
+
+    create_signal_outcomes(str(db_path), state_id, candidate, [5, 15])
+    history = get_signal_outcome_history(str(db_path))
+    for row in history:
+        update_signal_outcome(str(db_path), row["id"], observed_price=105)
+
+    summary = get_signal_outcome_summary(str(db_path), market="US", symbol="NVDA")
+
+    assert [row["horizon_minutes"] for row in summary] == [5, 15]
+    assert summary[0]["total_count"] == 1
+    assert summary[0]["win_count"] == 1
+    assert summary[0]["avg_pnl_pct"] == 5.0
 
 
 def test_parse_outcome_horizons_ignores_invalid_values():
