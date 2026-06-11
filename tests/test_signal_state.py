@@ -8,6 +8,7 @@ from app.db import (
     get_signal_outcome_history,
     get_signal_outcome_summary,
     get_signal_state_history,
+    get_training_dataset_rows,
     init_db,
     parse_outcome_horizons,
     update_signal_outcome,
@@ -166,6 +167,43 @@ def test_signal_outcome_summary_ignores_zero_observed_prices(tmp_path):
     update_signal_outcome(str(db_path), history[0]["id"], observed_price=0)
 
     assert get_signal_outcome_summary(str(db_path), market="US", symbol="NVDA") == []
+
+
+def test_training_dataset_rows_include_features_and_labels(tmp_path):
+    db_path = tmp_path / "signals.db"
+    init_db(str(db_path))
+    candidate = score_snapshot(
+        MarketSnapshot(
+            symbol="NVDA",
+            name="NVIDIA",
+            market="US",
+            price=100,
+            change_pct=4.5,
+            volume_ratio=5.0,
+            trading_value_krw=90_000_000_000,
+            open_price=98,
+            high_price=104,
+            vwap_price=99,
+            news_score=0.5,
+            exchange="NAS",
+        )
+    )
+    state_id = create_signal_state(str(db_path), candidate, build_trade_plan(candidate))
+
+    create_signal_outcomes(str(db_path), state_id, candidate, [30])
+    history = get_signal_outcome_history(str(db_path))
+    update_signal_outcome(str(db_path), history[0]["id"], observed_price=105)
+
+    rows = get_training_dataset_rows(str(db_path), market="US", symbol="NVDA")
+
+    assert len(rows) == 1
+    assert rows[0]["symbol"] == "NVDA"
+    assert rows[0]["horizon_minutes"] == 30
+    assert rows[0]["label_profit_5pct"] == 1
+    assert rows[0]["label_loss_3pct"] == 0
+    assert rows[0]["volume_ratio"] == 5.0
+    assert rows[0]["exchange"] == "NAS"
+    assert rows[0]["vwap_gap_pct"] is not None
 
 
 def test_parse_outcome_horizons_ignores_invalid_values():

@@ -544,6 +544,133 @@ def get_signal_outcome_summary(
     return [dict(row) for row in rows]
 
 
+def get_training_dataset_rows(
+    sqlite_path: str,
+    days: int = 30,
+    market: str | None = None,
+    symbol: str | None = None,
+) -> list[dict]:
+    threshold = datetime.now(KST) - timedelta(days=max(days, 1))
+    conditions = [
+        "created_at >= ?",
+        "status = ?",
+        "entry_price > 0",
+        "observed_price > 0",
+        "pnl_pct IS NOT NULL",
+    ]
+    params: list[str] = [threshold.isoformat(timespec="seconds"), "CHECKED"]
+    if market:
+        conditions.append("market = ?")
+        params.append(market)
+    if symbol:
+        conditions.append("symbol = ?")
+        params.append(symbol)
+    where = f"WHERE {' AND '.join(conditions)}"
+
+    with _connect(sqlite_path) as conn:
+        rows = conn.execute(
+            f"""
+            SELECT *
+            FROM signal_outcomes
+            {where}
+            ORDER BY created_at ASC, horizon_minutes ASC
+            """,
+            params,
+        ).fetchall()
+
+    return [_build_training_row(dict(row)) for row in rows]
+
+
+def _build_training_row(outcome: dict) -> dict:
+    payload = _load_json_dict(outcome.get("raw_json"))
+    snapshot = _load_json_dict(payload.get("snapshot"))
+    ai_analysis = _load_json_dict(payload.get("ai_analysis"))
+    reasons = payload.get("reasons") if isinstance(payload.get("reasons"), list) else []
+    risks = payload.get("risks") if isinstance(payload.get("risks"), list) else []
+
+    entry_price = float(outcome["entry_price"])
+    observed_price = float(outcome["observed_price"])
+    pnl_pct = float(outcome["pnl_pct"])
+    price = _float_or_none(snapshot.get("price"))
+    open_price = _float_or_none(snapshot.get("open_price"))
+    high_price = _float_or_none(snapshot.get("high_price"))
+    vwap_price = _float_or_none(snapshot.get("vwap_price"))
+
+    return {
+        "created_at": outcome["created_at"],
+        "checked_at": outcome["checked_at"],
+        "horizon_minutes": int(outcome["horizon_minutes"]),
+        "market": outcome["market"],
+        "symbol": outcome["symbol"],
+        "name": outcome["name"],
+        "entry_price": entry_price,
+        "observed_price": observed_price,
+        "pnl_pct": pnl_pct,
+        "label_profit_1pct": 1 if pnl_pct >= 1.0 else 0,
+        "label_profit_3pct": 1 if pnl_pct >= 3.0 else 0,
+        "label_profit_5pct": 1 if pnl_pct >= 5.0 else 0,
+        "label_loss_3pct": 1 if pnl_pct <= -3.0 else 0,
+        "candidate_score": int(payload.get("score") or 0),
+        "price": price,
+        "change_pct": _float_or_none(snapshot.get("change_pct")),
+        "volume_ratio": _float_or_none(snapshot.get("volume_ratio")),
+        "trading_value_krw": _float_or_none(snapshot.get("trading_value_krw")),
+        "vi_gap_pct": _float_or_none(snapshot.get("vi_gap_pct")),
+        "open_price": open_price,
+        "high_price": high_price,
+        "low_price": _float_or_none(snapshot.get("low_price")),
+        "vwap_price": vwap_price,
+        "vwap_gap_pct": _pct_gap(price, vwap_price),
+        "open_gap_pct": _pct_gap(price, open_price),
+        "pullback_from_high_pct": _pullback_from_high(price, high_price),
+        "foreign_flow_score": _float_or_none(snapshot.get("foreign_flow_score")),
+        "institution_flow_score": _float_or_none(snapshot.get("institution_flow_score")),
+        "program_flow_score": _float_or_none(snapshot.get("program_flow_score")),
+        "news_score": _float_or_none(snapshot.get("news_score")),
+        "disclosure_risk": _float_or_none(snapshot.get("disclosure_risk")),
+        "exchange": snapshot.get("exchange") or "",
+        "ai_recommendation": ai_analysis.get("recommendation") or "",
+        "ai_confidence": int(ai_analysis.get("confidence") or 0),
+        "reason_count": len(reasons),
+        "risk_count": len(risks),
+        "reasons": " | ".join(str(item) for item in reasons),
+        "risks": " | ".join(str(item) for item in risks),
+    }
+
+
+def _load_json_dict(value) -> dict:
+    if isinstance(value, dict):
+        return value
+    if not value:
+        return {}
+    try:
+        decoded = json.loads(value)
+    except (TypeError, ValueError):
+        return {}
+    return decoded if isinstance(decoded, dict) else {}
+
+
+def _float_or_none(value) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _pct_gap(left: float | None, right: float | None) -> float | None:
+    if left is None or right is None or right == 0:
+        return None
+    return ((left - right) / right) * 100
+
+
+def _pullback_from_high(price: float | None, high_price: float | None) -> float | None:
+    if price is None or high_price is None or high_price == 0:
+        return None
+    return ((high_price - price) / high_price) * 100
+
+
 def get_ai_analysis_history(
     sqlite_path: str,
     limit: int = 20,
