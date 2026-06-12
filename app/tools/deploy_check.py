@@ -7,6 +7,8 @@ SECRET_KEYS = (
     "TELEGRAM_BOT_TOKEN",
     "KIS_APP_KEY",
     "KIS_APP_SECRET",
+    "TOSS_API_KEY",
+    "TOSS_SECRET_KEY",
     "DART_API_KEY",
     "AI_API_KEY",
 )
@@ -53,7 +55,8 @@ def main() -> None:
     print("deploy_notes:")
     print("- Do not upload .env, token cache files, logs, or local SQLite DB unless intentionally migrating state.")
     print("- On the server, create a fresh .env from .env.example and paste secrets there.")
-    print("- Run python -m app.tools.kis_auth_check on the server to create a fresh KIS token cache.")
+    print("- Run python -m app.tools.kis_auth_check on the server if MARKET_MODE=kis_rank.")
+    print("- Run python -m app.tools.toss_config_check on the server before MARKET_MODE=toss_rank.")
     print("- Run python -m app.tools.ai_check on the server to verify Gemini.")
 
 

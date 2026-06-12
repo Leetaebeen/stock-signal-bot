@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     kis_env: str = "paper"
     kis_token_cache_path: str = "data/kis_token.json"
 
+    toss_api_key: str | None = None
+    toss_secret_key: str | None = None
+    toss_base_url: str | None = None
+    toss_request_interval_seconds: float = 1.1
+    toss_rank_count: int = 40
+
     dart_api_key: str | None = None
     sec_user_agent: str = "stock-signal-bot/0.1 your-email@example.com"
 
