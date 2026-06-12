@@ -106,6 +106,43 @@ def test_filter_rejects_us_candidate_over_2000_percent_volume_increase():
     assert any("2000% 초과" in risk for risk in decision.risks)
 
 
+def test_filter_accepts_us_explosion_candidate():
+    explosion = MarketSnapshot(
+        symbol="BOOM",
+        name="Boom Digital Holdings",
+        market="US",
+        price=3.2,
+        change_pct=44.0,
+        volume_ratio=2.5,
+        trading_value_krw=800_000_000,
+        vwap_price=3.0,
+    )
+
+    decision = evaluate_candidate_filter(explosion)
+    candidate = score_snapshot(explosion)
+
+    assert decision.passed
+    assert any("explosion mode" in reason for reason in decision.reasons)
+    assert candidate.score >= 70
+
+
+def test_score_prioritizes_liquid_explosion_candidate():
+    explosion = MarketSnapshot(
+        symbol="BYAH",
+        name="Park Ha Biological Technology",
+        market="US",
+        price=2.68,
+        change_pct=155.24,
+        volume_ratio=1.25,
+        trading_value_krw=37_500_000_000,
+        vwap_price=2.4,
+    )
+
+    candidate = score_snapshot(explosion)
+
+    assert candidate.score >= 80
+
+
 def test_filter_rejects_us_option_income_etf_by_symbol_and_name():
     by_symbol = MarketSnapshot(
         symbol="AMDY",

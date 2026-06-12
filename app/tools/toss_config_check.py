@@ -8,8 +8,17 @@ def main() -> None:
     print(f"toss_api_key={'set' if settings.toss_api_key else 'missing'}")
     print(f"toss_secret_key={'set' if settings.toss_secret_key else 'missing'}")
     print(f"toss_base_url={settings.toss_base_url or 'missing'}")
+    print(f"toss_token_cache_path={settings.toss_token_cache_path}")
+    print(f"toss_scan_cursor_path={settings.toss_scan_cursor_path}")
+    print(f"toss_spike_cache_path={settings.toss_spike_cache_path}")
     print(f"toss_request_interval_seconds={settings.toss_request_interval_seconds}")
     print(f"toss_rank_count={settings.toss_rank_count}")
+    print(f"toss_price_sweep_count={settings.toss_price_sweep_count}")
+    print(f"toss_spike_1m_pct={settings.toss_spike_1m_pct}")
+    print(f"toss_spike_5m_pct={settings.toss_spike_5m_pct}")
+    print(f"toss_spike_20m_pct={settings.toss_spike_20m_pct}")
+    print(f"toss_spike_max_candidates={settings.toss_spike_max_candidates}")
+    print(f"us_symbols_path={settings.us_symbols_path or 'default'}")
 
     if settings.toss_api_key:
         print(f"api_key_prefix={settings.toss_api_key[:9]}...")

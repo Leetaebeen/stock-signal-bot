@@ -33,6 +33,9 @@ def _score_kr(snapshot: MarketSnapshot) -> SignalCandidate:
     elif 11 < snapshot.change_pct <= 18:
         score += 5
         risks.append("이미 많이 오른 구간이라 추격 주의")
+    elif snapshot.change_pct > 12:
+        score -= 30
+        risks.append("explosion mode: too extended or weak volume")
     elif snapshot.change_pct < 0:
         score -= 20
         risks.append("당일 상승 모멘텀 부족")
@@ -64,8 +67,17 @@ def _score_us(snapshot: MarketSnapshot) -> SignalCandidate:
     score = 0
     reasons: list[str] = []
     risks: list[str] = []
+    explosion_candidate = (
+        12 < snapshot.change_pct <= 300
+        and snapshot.volume_ratio >= 1.2
+        and snapshot.trading_value_krw >= 100_000_000
+        and snapshot.price >= 0.1
+    )
 
-    if 4 <= snapshot.volume_ratio <= 12:
+    if explosion_candidate and snapshot.volume_ratio < 2:
+        score += 18
+        reasons.append(f"explosion mode: volume expansion {snapshot.volume_ratio:.2f}x")
+    elif 4 <= snapshot.volume_ratio <= 12:
         score += 32
         reasons.append(f"거래량 증가율 {snapshot.volume_ratio * 100:.0f}%")
     elif 2 <= snapshot.volume_ratio < 4:
@@ -92,8 +104,9 @@ def _score_us(snapshot: MarketSnapshot) -> SignalCandidate:
         score += 12
         reasons.append("강한 초입 모멘텀")
         risks.append("이미 일부 오른 구간이라 추격 주의")
-    elif snapshot.change_pct > 12:
-        score -= 30
+    elif 12 < snapshot.change_pct <= 300 and snapshot.volume_ratio >= 1.2:
+        score += 30
+        reasons.append("explosion mode: fast mover above 12%")
         risks.append("급등 초입을 지난 상승률")
     elif snapshot.change_pct < 0:
         score -= 20

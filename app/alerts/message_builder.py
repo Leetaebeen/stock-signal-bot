@@ -10,8 +10,9 @@ USD_KRW_RATE = 1350.0
 def build_scan_start_message(market_name: str) -> str:
     return (
         f"[{market_name} 감시 시작]\n"
-        "AI 급등 초입 포착을 시작합니다.\n"
-        "조건과 AI 판단을 통과한 1개 종목만 보냅니다."
+        "급등 포착 레이더를 시작합니다.\n"
+        "조건과 AI 판단을 통과한 최종 후보만 알림으로 보냅니다.\n"
+        "자동주문은 실행하지 않습니다."
     )
 
 
@@ -20,27 +21,26 @@ def build_signal_message(candidate: SignalCandidate) -> str:
     snap = candidate.snapshot
     ai_text = _format_ai_analysis(candidate)
     reasons = _format_list(candidate.reasons, empty="주요 포착 근거 없음")
-    risks = _format_list(candidate.risks, empty="현재 기준 주요 리스크 없음")
+    risks = _format_list(candidate.risks, empty="현재 기준 주요 위험 없음")
 
     return (
-        "[AI 급등 초입 포착]\n"
+        "[급등 후보 포착]\n"
         "------------------------------\n"
         f"종목명: {snap.name} ({snap.symbol})\n"
+        f"거래소: {snap.exchange or '-'}\n"
         f"매수가: {_format_price(snap.market, plan.entry_price)}\n"
         f"{_format_current_line(snap.market, snap.price, snap.change_pct)}\n"
         f"목표가: {_format_price(snap.market, plan.target_price)} (+{plan.expected_profit_pct:.2f}%)\n"
         f"손절가: {_format_price(snap.market, plan.stop_price)} (-{plan.stop_loss_pct:.1f}%)\n"
-        f"거래량증가율: {snap.volume_ratio * 100:.0f}%\n"
+        f"거래량 증가: {snap.volume_ratio:.2f}배\n"
         f"거래대금: {_format_krw(snap.trading_value_krw)}\n"
-        f"신호점수: {candidate.score}점\n"
-        f"{_exchange_line(snap.exchange)}"
-        "\n"
+        f"신호 점수: {candidate.score}점\n\n"
         f"{ai_text}"
         "[포착 근거]\n"
         f"{reasons}\n\n"
         "[주의 사항]\n"
         f"{risks}\n\n"
-        "자동매매가 아닙니다. 주문은 직접 판단하세요."
+        "자동매매 알림이 아닙니다. 주문 여부는 직접 판단하세요."
     )
 
 
@@ -53,9 +53,9 @@ def build_uptrend_message(candidate: SignalCandidate, previous_price: float) -> 
         "[상승세 알림]\n"
         "------------------------------\n"
         f"종목명: {snap.name} ({snap.symbol})\n"
-        f"이전가: {_format_price(snap.market, previous_price)}\n"
+        f"이전 알림가: {_format_price(snap.market, previous_price)}\n"
         f"{_format_current_line(snap.market, snap.price, snap.change_pct)}\n"
-        f"추가상승: {move_pct:+.2f}%\n"
+        f"추가 상승: {move_pct:+.2f}%\n"
         f"목표가: {_format_price(snap.market, plan.target_price)}\n"
         f"손절가: {_format_price(snap.market, plan.stop_price)}"
     )
@@ -81,9 +81,9 @@ def build_state_uptrend_message(state: dict, current_price: float, change_pct: f
         "[상승세 알림]\n"
         "------------------------------\n"
         f"종목명: {state['name']} ({state['symbol']})\n"
-        f"이전가: {_format_price(market, previous_price)}\n"
+        f"이전 알림가: {_format_price(market, previous_price)}\n"
         f"{_format_current_line(market, current_price, change_pct)}\n"
-        f"추가상승: {move_pct:+.2f}%\n"
+        f"추가 상승: {move_pct:+.2f}%\n"
         f"목표가: {_format_price(market, float(state['target_price']))}\n"
         f"손절가: {_format_price(market, float(state['stop_price']))}"
     )
@@ -123,11 +123,11 @@ def _format_ai_analysis(candidate: SignalCandidate) -> str:
     risk_notes = _format_list(analysis.risk_notes, empty="없음")
     return (
         "[AI 판단]\n"
-        f"판단: {analysis.recommendation}\n"
-        f"신뢰도: {analysis.confidence}점\n"
+        f"판정: {analysis.recommendation}\n"
+        f"확신도: {analysis.confidence}점\n"
         f"요약: {analysis.summary}\n"
-        f"핵심근거:\n{points}\n"
-        f"AI 리스크:\n{risk_notes}\n\n"
+        f"핵심 근거:\n{points}\n"
+        f"AI 위험 메모:\n{risk_notes}\n\n"
     )
 
 
@@ -135,10 +135,6 @@ def _format_list(items: list[str], empty: str) -> str:
     if not items:
         return f"- {empty}"
     return "\n".join(f"- {item}" for item in items)
-
-
-def _exchange_line(exchange: str | None) -> str:
-    return f"거래소: {exchange}\n" if exchange else ""
 
 
 def _format_price(market: str, price: float) -> str:

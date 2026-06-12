@@ -157,14 +157,25 @@ def _evaluate_us(snapshot: MarketSnapshot, config: FilterConfig) -> FilterDecisi
     reasons: list[str] = []
     risks: list[str] = []
     blocking_risks: list[str] = []
+    explosion_candidate = _is_us_explosion_candidate(snapshot)
 
     if is_excluded_us_product(snapshot):
         blocking_risks.append("레버리지/인버스/파생형 ETF 제외")
 
     if snapshot.price <= 0:
         blocking_risks.append("현재가 0 이하")
-    elif snapshot.price < config.us_min_price:
+    elif snapshot.price < config.us_min_price and not explosion_candidate:
         blocking_risks.append("2달러 미만 저가주 제외")
+
+    if explosion_candidate:
+        reasons.append("explosion mode: 12%+ fast mover with confirmed liquidity")
+        if snapshot.price < config.us_min_price:
+            risks.append("explosion mode: low price stock, spread/halts risk")
+        if snapshot.change_pct > 80:
+            risks.append("explosion mode: already extended, chase risk is high")
+        _append_intraday_strength(snapshot, reasons, risks, block_vwap=False)
+        risks.extend(blocking_risks)
+        return FilterDecision(passed=not blocking_risks, reasons=reasons, risks=risks)
 
     if config.us_volume_ratio_min <= snapshot.volume_ratio <= config.us_volume_ratio_max:
         reasons.append("거래량 증가율 200%~2000% 구간")
@@ -198,6 +209,15 @@ def _evaluate_us(snapshot: MarketSnapshot, config: FilterConfig) -> FilterDecisi
     risks.extend(blocking_risks)
 
     return FilterDecision(passed=not blocking_risks, reasons=reasons, risks=risks)
+
+
+def _is_us_explosion_candidate(snapshot: MarketSnapshot) -> bool:
+    return (
+        12 < snapshot.change_pct <= 300
+        and snapshot.volume_ratio >= 1.2
+        and snapshot.trading_value_krw >= 100_000_000
+        and snapshot.price >= 0.1
+    )
 
 
 def is_excluded_us_product(snapshot: MarketSnapshot) -> bool:

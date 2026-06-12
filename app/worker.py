@@ -14,6 +14,8 @@ from app.ai.analyst import ai_allows_alert, analyze_candidate
 from app.alerts.telegram import TelegramAlerter
 from app.brokers.kis_client import KisClient
 from app.brokers.kis_rank_client import KisRankClient
+from app.brokers.toss_client import TossClient
+from app.brokers.toss_rank_client import TossRankClient
 from app.config import Settings, get_settings, parse_enabled_markets
 from app.db import (
     count_ai_analysis_today,
@@ -69,7 +71,28 @@ def build_market_client(settings: Settings):
             dart_client=DartClient(settings.dart_api_key),
             sec_client=SecClient(settings.sec_user_agent),
         )
-    raise RuntimeError("Only MARKET_MODE=kis_rank is supported.")
+    if settings.market_mode == "toss_rank":
+        toss_client = TossClient(
+            api_key=settings.toss_api_key,
+            secret_key=settings.toss_secret_key,
+            base_url=settings.toss_base_url,
+            token_cache_path=settings.toss_token_cache_path,
+        )
+        return TossRankClient(
+            toss_client=toss_client,
+            request_interval_seconds=settings.toss_request_interval_seconds,
+            rank_count=settings.toss_rank_count,
+            us_symbols_path=settings.us_symbols_path,
+            scan_cursor_path=settings.toss_scan_cursor_path,
+            spike_cache_path=settings.toss_spike_cache_path,
+            price_sweep_count=settings.toss_price_sweep_count,
+            spike_1m_pct=settings.toss_spike_1m_pct,
+            spike_5m_pct=settings.toss_spike_5m_pct,
+            spike_20m_pct=settings.toss_spike_20m_pct,
+            spike_max_candidates=settings.toss_spike_max_candidates,
+            sec_client=SecClient(settings.sec_user_agent),
+        )
+    raise RuntimeError("Only MARKET_MODE=kis_rank or MARKET_MODE=toss_rank is supported.")
 
 
 async def run_once(settings: Settings, send_alert: bool = True, markets: set[str] | None = None):
@@ -209,7 +232,7 @@ async def monitor_active_signals(settings: Settings) -> None:
     if not states:
         return
 
-    kis_client = build_kis_client(settings)
+    client = build_market_client(settings)
     alerter = TelegramAlerter(
         settings.telegram_enabled,
         settings.telegram_bot_token,
@@ -230,17 +253,14 @@ async def monitor_active_signals(settings: Settings) -> None:
 
         try:
             if state["market"] == "KR":
-                snapshot = kis_client.get_domestic_price(state["symbol"], name=state["name"])
+                if not isinstance(client, KisRankClient):
+                    raise RuntimeError("KR active signal monitoring requires MARKET_MODE=kis_rank.")
+                snapshot = client.kis_client.get_domestic_price(state["symbol"], name=state["name"])
             else:
-                snapshot = _get_us_snapshot(
-                    kis_client,
-                    state["symbol"],
-                    state["name"],
-                    exchange=_extract_snapshot_exchange(state),
-                )
+                snapshot = _get_us_snapshot_from_market_client(client, state["symbol"], state["name"], _extract_snapshot_exchange(state))
         except Exception:
             logger.exception("active quote failed %s", state["symbol"])
-            await asyncio.sleep(settings.kis_request_interval_seconds)
+            await asyncio.sleep(_market_request_interval(settings))
             continue
 
         status = evaluate_signal_status(
@@ -271,7 +291,7 @@ async def monitor_active_signals(settings: Settings) -> None:
             update_signal_state(settings.sqlite_path, state["id"], "STOPPED", snapshot.price, snapshot.price)
             logger.info("stop alert sent %s", state["symbol"])
 
-        await asyncio.sleep(settings.kis_request_interval_seconds)
+        await asyncio.sleep(_market_request_interval(settings))
 
 
 async def monitor_signal_outcomes(settings: Settings) -> None:
@@ -279,13 +299,13 @@ async def monitor_signal_outcomes(settings: Settings) -> None:
     if not outcomes:
         return
 
-    kis_client = build_kis_client(settings)
+    client = build_market_client(settings)
     for outcome in outcomes:
         try:
-            snapshot = _get_outcome_snapshot(kis_client, outcome)
+            snapshot = _get_outcome_snapshot(client, outcome)
         except Exception:
             logger.exception("outcome quote failed %s:%s", outcome["market"], outcome["symbol"])
-            await asyncio.sleep(settings.kis_request_interval_seconds)
+            await asyncio.sleep(_market_request_interval(settings))
             continue
 
         update_signal_outcome(settings.sqlite_path, int(outcome["id"]), snapshot.price)
@@ -296,19 +316,30 @@ async def monitor_signal_outcomes(settings: Settings) -> None:
             outcome["horizon_minutes"],
             snapshot.price,
         )
-        await asyncio.sleep(settings.kis_request_interval_seconds)
+        await asyncio.sleep(_market_request_interval(settings))
 
 
-def _get_outcome_snapshot(kis_client: KisClient, outcome: dict):
+def _get_outcome_snapshot(client, outcome: dict):
     if outcome["market"] == "KR":
-        return kis_client.get_domestic_price(outcome["symbol"], name=outcome["name"])
+        if not isinstance(client, KisRankClient):
+            raise RuntimeError("KR outcome monitoring requires MARKET_MODE=kis_rank.")
+        return client.kis_client.get_domestic_price(outcome["symbol"], name=outcome["name"])
 
-    return _get_us_snapshot(
-        kis_client,
-        outcome["symbol"],
-        outcome["name"],
-        exchange=_extract_snapshot_exchange(outcome),
-    )
+    return _get_us_snapshot_from_market_client(client, outcome["symbol"], outcome["name"], _extract_snapshot_exchange(outcome))
+
+
+def _get_us_snapshot_from_market_client(client, symbol: str, name: str, exchange: str | None = None):
+    if isinstance(client, TossRankClient):
+        return client.get_us_snapshot(symbol, name=name, exchange=exchange)
+    if isinstance(client, KisRankClient):
+        return _get_us_snapshot(client.kis_client, symbol, name, exchange=exchange)
+    raise RuntimeError(f"Unsupported market client for US quote: {type(client).__name__}")
+
+
+def _market_request_interval(settings: Settings) -> float:
+    if settings.market_mode == "toss_rank":
+        return settings.toss_request_interval_seconds
+    return settings.kis_request_interval_seconds
 
 
 def _get_us_snapshot(kis_client: KisClient, symbol: str, name: str, exchange: str | None = None):
