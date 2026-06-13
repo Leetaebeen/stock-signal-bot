@@ -133,7 +133,7 @@ def test_score_prioritizes_liquid_explosion_candidate():
         market="US",
         price=2.68,
         change_pct=155.24,
-        volume_ratio=1.25,
+        volume_ratio=1.95,
         trading_value_krw=37_500_000_000,
         vwap_price=2.4,
     )
@@ -141,6 +141,23 @@ def test_score_prioritizes_liquid_explosion_candidate():
     candidate = score_snapshot(explosion)
 
     assert candidate.score >= 80
+
+
+def test_filter_rejects_explosion_candidate_below_90_percent_volume_increase():
+    weak_volume = MarketSnapshot(
+        symbol="OTLK",
+        name="Outlook Therapeutics",
+        market="US",
+        price=1.37,
+        change_pct=24.46,
+        volume_ratio=1.67,
+        trading_value_krw=2_100_000_000,
+        vwap_price=1.3,
+    )
+
+    decision = evaluate_candidate_filter(weak_volume)
+
+    assert not decision.passed
 
 
 def test_filter_rejects_us_option_income_etf_by_symbol_and_name():

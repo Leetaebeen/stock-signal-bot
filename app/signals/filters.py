@@ -214,7 +214,7 @@ def _evaluate_us(snapshot: MarketSnapshot, config: FilterConfig) -> FilterDecisi
 def _is_us_explosion_candidate(snapshot: MarketSnapshot) -> bool:
     return (
         12 < snapshot.change_pct <= 300
-        and snapshot.volume_ratio >= 1.2
+        and snapshot.volume_ratio >= 1.9
         and snapshot.trading_value_krw >= 100_000_000
         and snapshot.price >= 0.1
     )

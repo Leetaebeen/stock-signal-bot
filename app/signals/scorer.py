@@ -69,7 +69,7 @@ def _score_us(snapshot: MarketSnapshot) -> SignalCandidate:
     risks: list[str] = []
     explosion_candidate = (
         12 < snapshot.change_pct <= 300
-        and snapshot.volume_ratio >= 1.2
+        and snapshot.volume_ratio >= 1.9
         and snapshot.trading_value_krw >= 100_000_000
         and snapshot.price >= 0.1
     )
@@ -104,7 +104,7 @@ def _score_us(snapshot: MarketSnapshot) -> SignalCandidate:
         score += 12
         reasons.append("강한 초입 모멘텀")
         risks.append("이미 일부 오른 구간이라 추격 주의")
-    elif 12 < snapshot.change_pct <= 300 and snapshot.volume_ratio >= 1.2:
+    elif 12 < snapshot.change_pct <= 300 and snapshot.volume_ratio >= 1.9:
         score += 30
         reasons.append("explosion mode: fast mover above 12%")
         risks.append("급등 초입을 지난 상승률")
