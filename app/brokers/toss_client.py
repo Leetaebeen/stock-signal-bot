@@ -169,10 +169,11 @@ def build_us_snapshot_from_toss(
         change_pct = 0.0
 
     market = str(stock_row.get("market") or exchange or "").upper() or None
-    resolved_name = name or stock_row.get("englishName") or stock_row.get("name") or symbol
+    resolved_name = name or stock_row.get("name") or stock_row.get("englishName") or symbol
     minute_volume = _recent_minute_volume(minute_candles or [], window=30)
     reference_volume = max(current_volume, minute_volume)
     trading_value_krw = price * reference_volume * usd_krw if reference_volume > 0 else 0.0
+    price_krw = price * usd_krw
     vwap_price = _typical_price(high_price, low_price, price)
 
     return MarketSnapshot(
@@ -183,6 +184,7 @@ def build_us_snapshot_from_toss(
         change_pct=change_pct,
         volume_ratio=volume_ratio,
         trading_value_krw=trading_value_krw,
+        price_krw=price_krw,
         open_price=open_price or None,
         high_price=high_price or None,
         low_price=low_price or None,

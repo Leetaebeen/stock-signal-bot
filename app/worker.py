@@ -188,16 +188,6 @@ async def run_once(settings: Settings, send_alert: bool = True, markets: set[str
             save_signal(settings.sqlite_path, strongest, alerted=False)
             return None
 
-    active_state = get_active_signal_state(
-        settings.sqlite_path,
-        strongest.snapshot.market,
-        strongest.snapshot.symbol,
-    )
-    if active_state:
-        logger.info("signal already active %s:%s", strongest.snapshot.market, strongest.snapshot.symbol)
-        save_signal(settings.sqlite_path, strongest, alerted=False)
-        return strongest
-
     recently_alerted = was_recently_alerted(
         settings.sqlite_path,
         strongest.snapshot.symbol,
@@ -214,13 +204,6 @@ async def run_once(settings: Settings, send_alert: bool = True, markets: set[str
         alert_sent = await alerter.send(build_signal_message(strongest))
         if alert_sent:
             logger.info("signal alert sent %s:%s", strongest.snapshot.market, strongest.snapshot.symbol)
-            state_id = create_signal_state(settings.sqlite_path, strongest, build_trade_plan(strongest))
-            create_signal_outcomes(
-                settings.sqlite_path,
-                state_id,
-                strongest,
-                parse_outcome_horizons(settings.outcome_horizon_minutes),
-            )
         else:
             logger.info("signal alert skipped or disabled %s:%s", strongest.snapshot.market, strongest.snapshot.symbol)
     save_signal(settings.sqlite_path, strongest, alerted=alert_sent)
@@ -415,8 +398,6 @@ async def main_loop() -> None:
             continue
 
         try:
-            await monitor_active_signals(settings)
-            await monitor_signal_outcomes(settings)
             strongest = await run_once(settings, send_alert=True, markets=open_markets)
             if strongest:
                 snap = strongest.snapshot

@@ -14,6 +14,7 @@ class MarketSnapshot:
     change_pct: float
     volume_ratio: float
     trading_value_krw: float
+    price_krw: float | None = None
     vi_gap_pct: float | None = None
     open_price: float | None = None
     high_price: float | None = None
