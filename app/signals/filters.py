@@ -76,7 +76,6 @@ EXCLUDED_US_PRODUCT_KEYWORDS = {
     "TARGET INCOME",
     "PREFERRED",
     "PREF",
-    "우선주",
     "COHEN & STEERS",
     "LEVERAGED",
     "INVERSE",
@@ -116,8 +115,8 @@ def filter_config_from_settings(settings) -> FilterConfig:
 
 
 def evaluate_candidate_filter(snapshot: MarketSnapshot, config: FilterConfig | None = None) -> FilterDecision:
-    if snapshot.market == "KR":
-        return _evaluate_kr(snapshot)
+    if snapshot.market != "US":
+        return FilterDecision(passed=False, reasons=[], risks=["미국장만 지원"])
     return _evaluate_us(snapshot, config or FilterConfig())
 
 
@@ -129,30 +128,6 @@ def filter_candidates(
     return [snapshot for snapshot in snapshots if evaluate_candidate_filter(snapshot, config).passed]
 
 
-def _evaluate_kr(snapshot: MarketSnapshot) -> FilterDecision:
-    reasons: list[str] = []
-    risks: list[str] = []
-
-    if snapshot.price < 1_000:
-        risks.append("현재가 1,000원 미만")
-
-    if snapshot.trading_value_krw >= 30_000_000_000:
-        reasons.append("거래대금 300억 이상")
-    else:
-        risks.append("거래대금 300억 미만")
-
-    if 2 <= snapshot.change_pct <= 15:
-        reasons.append("등락률이 단기 후보 구간")
-    elif snapshot.change_pct > 18:
-        risks.append("이미 과열된 상승률")
-    else:
-        risks.append("등락률 조건 미충족")
-
-    _append_intraday_strength(snapshot, reasons, risks, block_vwap=False)
-
-    return FilterDecision(passed=not risks, reasons=reasons, risks=risks)
-
-
 def _evaluate_us(snapshot: MarketSnapshot, config: FilterConfig) -> FilterDecision:
     reasons: list[str] = []
     risks: list[str] = []
@@ -160,7 +135,7 @@ def _evaluate_us(snapshot: MarketSnapshot, config: FilterConfig) -> FilterDecisi
     explosion_candidate = _is_us_explosion_candidate(snapshot)
 
     if is_excluded_us_product(snapshot):
-        blocking_risks.append("레버리지/인버스/파생형 ETF 제외")
+        blocking_risks.append("ETF/레버리지/파생형 상품 제외")
 
     if snapshot.price <= 0:
         blocking_risks.append("현재가 0 이하")
@@ -168,11 +143,11 @@ def _evaluate_us(snapshot: MarketSnapshot, config: FilterConfig) -> FilterDecisi
         blocking_risks.append("2달러 미만 저가주 제외")
 
     if explosion_candidate:
-        reasons.append("explosion mode: 12%+ fast mover with confirmed liquidity")
+        reasons.append("초급등 모드: 12% 이상 급등과 거래량 90% 이상 증가")
         if snapshot.price < config.us_min_price:
-            risks.append("explosion mode: low price stock, spread/halts risk")
+            risks.append("저가주라 스프레드와 거래정지 위험 주의")
         if snapshot.change_pct > 80:
-            risks.append("explosion mode: already extended, chase risk is high")
+            risks.append("이미 크게 오른 구간이라 추격매수 위험 높음")
         _append_intraday_strength(snapshot, reasons, risks, block_vwap=False)
         risks.extend(blocking_risks)
         return FilterDecision(passed=not blocking_risks, reasons=reasons, risks=risks)
@@ -194,14 +169,14 @@ def _evaluate_us(snapshot: MarketSnapshot, config: FilterConfig) -> FilterDecisi
         blocking_risks.append("미장 거래대금 5억 미만")
 
     if 3 <= snapshot.change_pct <= 8:
-        reasons.append("상승률이 급등 초입 핵심 구간")
+        reasons.append("상승률이 급등 초입 구간")
     elif config.us_change_pct_min <= snapshot.change_pct < 3:
         reasons.append("초기 상승 모멘텀")
     elif 8 < snapshot.change_pct <= config.us_change_pct_max:
-        reasons.append("강한 초입 모멘텀")
-        risks.append("이미 일부 오른 구간이라 추격 주의")
+        reasons.append("강한 상승 모멘텀")
+        risks.append("이미 빠르게 오른 구간이라 추격 주의")
     elif snapshot.change_pct > config.us_change_pct_max:
-        blocking_risks.append("12% 초과 상승은 급등 초입 제외")
+        blocking_risks.append("12% 초과 상승은 일반 초입 필터 제외")
     else:
         blocking_risks.append("등락률 2% 미만")
 
@@ -240,7 +215,7 @@ def _append_intraday_strength(
         if high_pullback_pct <= 3:
             reasons.append("고가 대비 3% 이내 유지")
         else:
-            risks.append("고가 대비 이탈폭이 큼")
+            risks.append("고가 대비 이탈폭 큼")
 
     if snapshot.vwap_price and snapshot.vwap_price > 0:
         if snapshot.price >= snapshot.vwap_price:

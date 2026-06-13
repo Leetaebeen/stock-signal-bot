@@ -39,11 +39,7 @@ ALLOWLIST_PATTERNS = (
     "sample-access-token",
     "fresh-token",
     "old-token",
-    "your_app_key",
-    "your_app_secret",
     "your-email@example.com",
-    "AI_API_KEY=",
-    "KIS_APP_SECRET=",
     "TELEGRAM_BOT_TOKEN=",
 )
 

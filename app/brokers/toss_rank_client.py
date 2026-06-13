@@ -45,9 +45,6 @@ class TossRankClient:
         self.spike_max_candidates = spike_max_candidates
         self.sec_client = sec_client
 
-    async def get_kr_snapshots(self) -> list[MarketSnapshot]:
-        return []
-
     async def get_us_snapshots(self) -> list[MarketSnapshot]:
         all_symbols = load_us_symbols(self.us_symbols_path)
         prices = self._sweep_prices(all_symbols)

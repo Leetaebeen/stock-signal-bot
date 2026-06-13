@@ -5,19 +5,14 @@ from app.config import get_settings
 
 SECRET_KEYS = (
     "TELEGRAM_BOT_TOKEN",
-    "KIS_APP_KEY",
-    "KIS_APP_SECRET",
     "TOSS_API_KEY",
     "TOSS_SECRET_KEY",
-    "DART_API_KEY",
-    "AI_API_KEY",
 )
 
 SENSITIVE_PATHS = (
     ".env",
-    "data/kis_token.json",
-    "data/kis_token_real.json",
-    "data/kis_token_paper.json",
+    "data/toss_token.json",
+    "data/toss_price_cache.json",
     "data/signals.db",
     "logs/stock_signal.log",
     "logs/worker.stdout.log",
@@ -35,16 +30,14 @@ def main() -> None:
     print("runtime:")
     print(f"- market_mode={settings.market_mode}")
     print(f"- enabled_markets={settings.enabled_markets}")
-    print(f"- kis_env={settings.kis_env}")
     print(f"- scan_interval_seconds={settings.scan_interval_seconds}")
     print(f"- min_alert_score={settings.min_alert_score}")
-    print(f"- ai_enabled={settings.ai_analysis_enabled}")
-    print(f"- ai_provider={settings.ai_provider}")
-    print(f"- ai_model={settings.ai_model or 'default'}")
+    print(f"- toss_rank_count={settings.toss_rank_count}")
+    print(f"- toss_price_sweep_count={settings.toss_price_sweep_count}")
     print("")
     print("secret_env:")
     for key in SECRET_KEYS:
-        value = getattr(settings, _settings_name(key), None)
+        value = getattr(settings, key.lower(), None)
         print(f"- {key}={'set' if value else 'missing'}")
     print("")
     print("local_sensitive_files:")
@@ -54,14 +47,8 @@ def main() -> None:
     print("")
     print("deploy_notes:")
     print("- Do not upload .env, token cache files, logs, or local SQLite DB unless intentionally migrating state.")
-    print("- On the server, create a fresh .env from .env.example and paste secrets there.")
-    print("- Run python -m app.tools.kis_auth_check on the server if MARKET_MODE=kis_rank.")
-    print("- Run python -m app.tools.toss_config_check on the server before MARKET_MODE=toss_rank.")
-    print("- Run python -m app.tools.ai_check on the server to verify Gemini.")
-
-
-def _settings_name(env_key: str) -> str:
-    return env_key.lower()
+    print("- Run python -m app.tools.toss_config_check on the server after editing .env.")
+    print("- Run python -m app.tools.toss_auth_check on the server to verify Toss IP allowlist and credentials.")
 
 
 if __name__ == "__main__":

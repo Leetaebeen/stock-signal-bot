@@ -1,8 +1,7 @@
 ﻿from dataclasses import dataclass, asdict
 from typing import Any, Literal
 
-Market = Literal["KR", "US"]
-AIRecommendation = Literal["BUY", "WATCH", "SKIP"]
+Market = Literal["US"]
 
 
 @dataclass(frozen=True)
@@ -32,24 +31,11 @@ class MarketSnapshot:
 
 
 @dataclass(frozen=True)
-class AIAnalysis:
-    recommendation: AIRecommendation
-    confidence: int
-    summary: str
-    key_points: list[str]
-    risk_notes: list[str]
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
-@dataclass(frozen=True)
 class SignalCandidate:
     snapshot: MarketSnapshot
     score: int
     reasons: list[str]
     risks: list[str]
-    ai_analysis: AIAnalysis | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -57,18 +43,4 @@ class SignalCandidate:
             "score": self.score,
             "reasons": self.reasons,
             "risks": self.risks,
-            "ai_analysis": self.ai_analysis.to_dict() if self.ai_analysis else None,
         }
-
-
-@dataclass(frozen=True)
-class TradePlan:
-    entry_price: float
-    current_price: float
-    target_price: float
-    stop_price: float
-    expected_profit_pct: float
-    stop_loss_pct: float
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)

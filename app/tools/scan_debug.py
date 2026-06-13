@@ -11,9 +11,8 @@ async def _main() -> None:
     filter_config = filter_config_from_settings(settings)
     client = build_market_client(settings)
     enabled_markets = parse_enabled_markets(settings.enabled_markets)
+
     snapshots = []
-    if "KR" in enabled_markets:
-        snapshots.extend(await client.get_kr_snapshots())
     if "US" in enabled_markets:
         snapshots.extend(await client.get_us_snapshots())
 
@@ -26,7 +25,7 @@ async def _main() -> None:
         print(
             f"{snapshot.market}:{snapshot.symbol} {snapshot.name} "
             f"price={snapshot.price:,.2f} change={snapshot.change_pct:+.2f}% "
-            f"value={snapshot.trading_value_krw / 100_000_000:,.0f}억 "
+            f"value={snapshot.trading_value_krw / 100_000_000:,.0f}억원 "
             f"volume_ratio={snapshot.volume_ratio:.1f} "
             f"high={snapshot.high_price or 0:,.2f} vwap={snapshot.vwap_price or 0:,.2f} "
             f"score={candidate.score} passed={decision.passed}"

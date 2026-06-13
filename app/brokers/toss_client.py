@@ -189,7 +189,7 @@ def build_us_snapshot_from_toss(
         high_price=high_price or None,
         low_price=low_price or None,
         vwap_price=vwap_price,
-        exchange=_to_kis_exchange(market),
+        exchange=_to_exchange_code(market),
     )
 
 
@@ -261,7 +261,7 @@ def _typical_price(high_price: float, low_price: float, close_price: float) -> f
     return None
 
 
-def _to_kis_exchange(market: str | None) -> str | None:
+def _to_exchange_code(market: str | None) -> str | None:
     if market == "NASDAQ":
         return "NAS"
     if market == "NYSE":

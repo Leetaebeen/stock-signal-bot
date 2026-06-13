@@ -122,7 +122,7 @@ def test_filter_accepts_us_explosion_candidate():
     candidate = score_snapshot(explosion)
 
     assert decision.passed
-    assert any("explosion mode" in reason for reason in decision.reasons)
+    assert any("초급등 모드" in reason for reason in decision.reasons)
     assert candidate.score >= 70
 
 

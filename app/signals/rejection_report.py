@@ -19,6 +19,7 @@ RISK_LABELS = {
     "change_too_high": "등락률 12% 초과",
     "vwap_break": "VWAP 아래 이탈",
     "high_pullback": "고점 대비 3% 초과 이탈",
+    "unsupported_market": "미국장 외 시장",
     "other": "기타",
 }
 
@@ -35,16 +36,16 @@ def build_rejection_report(
 
     for snapshot in snapshots:
         decision = evaluate_candidate_filter(snapshot, filter_config)
-        candidate = score_snapshot(snapshot)
         categories = _risk_categories(snapshot, filter_config)
         if not decision.passed and not categories:
             categories = ["other"]
 
+        candidate = score_snapshot(snapshot) if snapshot.market == "US" else None
         row = {
             "market": snapshot.market,
             "symbol": snapshot.symbol,
             "name": snapshot.name,
-            "score": candidate.score,
+            "score": candidate.score if candidate else 0,
             "price": snapshot.price,
             "change_pct": snapshot.change_pct,
             "volume_ratio": snapshot.volume_ratio,
@@ -77,8 +78,8 @@ def build_rejection_report(
 
 
 def _risk_categories(snapshot: MarketSnapshot, config: FilterConfig) -> list[str]:
-    if snapshot.market == "KR":
-        return []
+    if snapshot.market != "US":
+        return ["unsupported_market"]
 
     categories = []
     if is_excluded_us_product(snapshot):
