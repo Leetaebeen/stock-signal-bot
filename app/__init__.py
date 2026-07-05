@@ -1,1 +1,1 @@
-﻿
+"""Stock paper trading project."""

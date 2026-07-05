@@ -1,1 +1,1 @@
-﻿
+"""Alert integrations."""

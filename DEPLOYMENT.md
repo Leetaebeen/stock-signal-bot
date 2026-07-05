@@ -1,58 +1,14 @@
-# Deployment Notes
+# 배포 메모
 
-This project can run locally or on a small VM. Do not upload local secrets or runtime state by accident.
+현재 버전은 KIS 모의투자 읽기 전용 확인 단계입니다.
 
-## Do Not Upload
+서버 배포 전 확인:
 
-- `.env`
-- `.venv/`
-- `data/kis_token*.json`
-- `data/signals.db`
-- `logs/`
-- `__pycache__/`
-- `.pytest_cache/`
-
-These are already covered by `.gitignore`.
-
-## Upload Or Commit
-
-- `app/`
-- `scripts/`
-- `tests/`
-- `.env.example`
-- `.gitignore`
-- `README.md`
-- `DEPLOYMENT.md`
-- `requirements.txt`
-
-## Server Setup
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-Copy-Item .env.example .env
-```
-
-Then edit `.env` on the server and run:
-
-```powershell
-python -m app.tools.kis_auth_check
-python -m app.tools.ai_check
-python -m app.tools.scan_once
-```
-
-## Local Background Worker
-
-```powershell
-.\scripts\start_worker_bg.ps1
-.\scripts\worker_status.ps1
-.\scripts\stop_worker.ps1
-```
-
-## Pre-Deploy Check
-
-```powershell
-python -m app.tools.deploy_check
+```bash
+python -m pytest -q
 python -m app.tools.security_check
+python -m app.tools.kis_auth_check
+python -m app.tools.kis_balance_check
 ```
+
+`.env`, 토큰 캐시, SQLite DB, 로그 파일은 Git에 올리지 않습니다.

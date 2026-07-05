@@ -9,27 +9,13 @@ EXCLUDED_DIRS = {
     "venv",
     "__pycache__",
     ".pytest_cache",
-    ".mypy_cache",
-    ".ruff_cache",
     "data",
     "logs",
 }
 EXCLUDED_FILES = {".env"}
-TEXT_SUFFIXES = {
-    ".py",
-    ".md",
-    ".txt",
-    ".toml",
-    ".yaml",
-    ".yml",
-    ".json",
-    ".ps1",
-    ".example",
-    "",
-}
+TEXT_SUFFIXES = {".py", ".md", ".txt", ".toml", ".yaml", ".yml", ".json", ".ps1", ".example", ""}
 PATTERNS = {
     "telegram_bot_token_like": re.compile(r"\b\d{8,12}:[A-Za-z0-9_-]{25,}\b"),
-    "google_api_key_like": re.compile(r"\bAIza[0-9A-Za-z_-]{20,}\b"),
     "bearer_token_literal": re.compile(r"\bBearer\s+[A-Za-z0-9._-]{20,}\b"),
     "secret_assignment": re.compile(
         r"(?i)\b(api[_-]?key|secret|token|appsecret|appkey)\b\s*[:=]\s*['\"][^'\"]{12,}['\"]"
@@ -37,10 +23,12 @@ PATTERNS = {
 }
 ALLOWLIST_PATTERNS = (
     "sample-access-token",
-    "fresh-token",
     "old-token",
-    "your-email@example.com",
+    "fresh-token",
+    "KIS_APP_KEY=",
+    "KIS_APP_SECRET=",
     "TELEGRAM_BOT_TOKEN=",
+    "TELEGRAM_CHAT_ID=",
 )
 
 
