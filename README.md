@@ -1,25 +1,28 @@
 # Stock Paper Trader
 
-한국투자증권 KIS Open API 모의투자 전용 자동매매 학습 프로젝트입니다.
+한국투자증권 KIS Open API 모의투자 기반 자동매매 학습 프로젝트입니다.
 
-현재 단계는 **모의투자 읽기 전용 연결 + 거래 이벤트 알림 기반**입니다.
+현재 단계는 **모의투자 연결 + 주문 차단 안전장치 + 거래 이벤트 알림 구조**입니다. 실계좌 주문은 막아두고, 모의투자 주문도 `ORDER_ENABLED=true`와 실행 옵션을 같이 켰을 때만 나가도록 설계합니다.
+
+## 현재 기능
 
 - KIS 모의투자 토큰 발급
-- 모의투자 계좌 잔고 조회
+- 모의투자 국내 잔고 조회
 - 국내/해외 현재가 조회
-- 텔레그램 거래 이벤트 알림
-- 실계좌 주문 차단
-- 실제 주문 API 미구현
+- 국내/해외 모의 주문 API 연결
+- 주문 기본값 차단: `ORDER_ENABLED=false`
+- 텔레그램 거래 이벤트 메시지 포맷
+- 보안 체크와 테스트
 
 ## 환경변수
 
-`.env`에 아래 값을 넣습니다.
+`.env`에 아래 값을 설정합니다.
 
 ```env
 KIS_ENV=paper
 KIS_APP_KEY=모의투자_APP_KEY
 KIS_APP_SECRET=모의투자_APP_SECRET
-KIS_ACCOUNT_NO=계좌번호_앞8자리
+KIS_ACCOUNT_NO=계좌번호_앞_8자리
 KIS_ACCOUNT_PRODUCT_CODE=계좌상품코드_2자리
 KIS_TOKEN_CACHE_PATH=data/kis_token_paper.json
 
@@ -41,12 +44,23 @@ REAL_TRADING_ENABLED=false
 ```powershell
 python -m app.tools.kis_auth_check
 python -m app.tools.kis_balance_check
-python -m app.tools.kis_quote_check NVDA --market US --exchange NAS --name NVIDIA
 python -m app.tools.kis_quote_check 005930 --market KR --name 삼성전자
+python -m app.tools.kis_quote_check NVDA --market US --exchange NAS --name NVIDIA
 python -m app.tools.telegram_test
 ```
 
-## 알림 정책
+## 주문 드라이런
+
+아래 명령은 실제 주문을 보내지 않습니다.
+
+```powershell
+python -m app.tools.kis_order_check KR buy 005930 --qty 1 --price 78000
+python -m app.tools.kis_order_check US buy NVDA --qty 1 --price 144.2 --exchange NAS
+```
+
+실제 모의 주문 테스트는 나중에 `ORDER_ENABLED=true`로 바꾸고 `--execute`를 붙여서 1주 단위로만 진행합니다.
+
+## 텔레그램 알림 정책
 
 자동 실행 중 텔레그램은 거래 이벤트에만 사용합니다.
 
@@ -63,4 +77,4 @@ python -m app.tools.telegram_test
 - `PAPER_TRADING_ONLY=true`가 아니면 중단합니다.
 - `REAL_TRADING_ENABLED=true`면 중단합니다.
 - `ORDER_ENABLED=false`가 기본값입니다.
-- 주문 API는 아직 구현하지 않습니다.
+- 실계좌 자동주문은 구현하지 않습니다.

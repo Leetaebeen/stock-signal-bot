@@ -21,6 +21,29 @@ class PriceSnapshot:
     exchange: str | None = None
 
 
+@dataclass(frozen=True)
+class OrderRequest:
+    market: str
+    side: str
+    symbol: str
+    quantity: int
+    price: float
+    order_type: str = "limit"
+    exchange: str | None = None
+
+
+@dataclass(frozen=True)
+class OrderResult:
+    market: str
+    side: str
+    symbol: str
+    quantity: int
+    price: float
+    order_no: str | None
+    message: str
+    raw: dict[str, Any]
+
+
 class KisClient:
     def __init__(
         self,
@@ -107,6 +130,91 @@ class KisClient:
             raise RuntimeError(f"KIS overseas price returned zero price: {exchange}:{symbol}")
         return snapshot
 
+    def place_domestic_order(
+        self,
+        *,
+        side: str,
+        symbol: str,
+        quantity: int,
+        price: int,
+        order_type: str = "limit",
+        order_enabled: bool,
+        paper_trading_only: bool,
+        real_trading_enabled: bool,
+    ) -> OrderResult:
+        self._assert_order_allowed(order_enabled, paper_trading_only, real_trading_enabled)
+        normalized_side = _normalize_side(side)
+        payload = self._build_domestic_order_payload(
+            side=normalized_side,
+            symbol=symbol,
+            quantity=quantity,
+            price=price,
+            order_type=order_type,
+        )
+        tr_id = "VTTC0802U" if normalized_side == "buy" else "VTTC0801U"
+        response = self._post_with_auth_retry(
+            "/uapi/domestic-stock/v1/trading/order-cash",
+            tr_id=tr_id,
+            payload=payload,
+        )
+        checked = _checked_payload(response, "KIS domestic order request failed")
+        return _order_payload_to_result("KR", normalized_side, symbol, quantity, price, checked)
+
+    def place_overseas_order(
+        self,
+        *,
+        side: str,
+        symbol: str,
+        quantity: int,
+        price: float,
+        exchange: str = "NAS",
+        order_type: str = "limit",
+        order_enabled: bool,
+        paper_trading_only: bool,
+        real_trading_enabled: bool,
+    ) -> OrderResult:
+        self._assert_order_allowed(order_enabled, paper_trading_only, real_trading_enabled)
+        normalized_side = _normalize_side(side)
+        payload = self._build_overseas_order_payload(
+            symbol=symbol,
+            quantity=quantity,
+            price=price,
+            exchange=exchange,
+            order_type=order_type,
+        )
+        tr_id = "VTTT1002U" if normalized_side == "buy" else "VTTT1001U"
+        response = self._post_with_auth_retry(
+            "/uapi/overseas-stock/v1/trading/order",
+            tr_id=tr_id,
+            payload=payload,
+        )
+        checked = _checked_payload(response, "KIS overseas order request failed")
+        return _order_payload_to_result("US", normalized_side, symbol, quantity, price, checked)
+
+    def build_order_request(
+        self,
+        *,
+        market: str,
+        side: str,
+        symbol: str,
+        quantity: int,
+        price: float,
+        exchange: str | None = None,
+        order_type: str = "limit",
+    ) -> OrderRequest:
+        normalized_market = market.strip().upper()
+        if normalized_market not in {"KR", "US"}:
+            raise ValueError("market must be KR or US.")
+        return OrderRequest(
+            market=normalized_market,
+            side=_normalize_side(side),
+            symbol=symbol.strip().upper(),
+            quantity=_positive_int(quantity, "quantity"),
+            price=_non_negative_float(price, "price"),
+            exchange=exchange,
+            order_type=_normalize_order_type(order_type),
+        )
+
     def _get_with_auth_retry(self, path: str, tr_id: str, params: dict[str, Any]) -> httpx.Response:
         response = self._get_with_auth(path, tr_id=tr_id, params=params, force_refresh=False)
         if _is_expired_token_response(response):
@@ -134,6 +242,90 @@ class KisClient:
             params=params,
         )
 
+    def _post_with_auth_retry(self, path: str, tr_id: str, payload: dict[str, Any]) -> httpx.Response:
+        response = self._post_with_auth(path, tr_id=tr_id, payload=payload, force_refresh=False)
+        if _is_expired_token_response(response):
+            response = self._post_with_auth(path, tr_id=tr_id, payload=payload, force_refresh=True)
+        return response
+
+    def _post_with_auth(
+        self,
+        path: str,
+        tr_id: str,
+        payload: dict[str, Any],
+        force_refresh: bool,
+    ) -> httpx.Response:
+        token = self.auth.get_access_token(force_refresh=force_refresh)
+        hashkey = self.auth.make_hashkey(payload)
+        return self.http_client.post(
+            f"{self.base_url}{path}",
+            headers={
+                "content-type": "application/json; charset=utf-8",
+                "authorization": token.authorization,
+                "appkey": self.app_key or "",
+                "appsecret": self.app_secret or "",
+                "tr_id": tr_id,
+                "custtype": "P",
+                "hashkey": hashkey,
+            },
+            json=payload,
+        )
+
+    def _assert_order_allowed(
+        self,
+        order_enabled: bool,
+        paper_trading_only: bool,
+        real_trading_enabled: bool,
+    ) -> None:
+        if not order_enabled:
+            raise RuntimeError("ORDER_ENABLED must be true before placing orders.")
+        self.assert_readonly_paper_mode(
+            paper_trading_only=paper_trading_only,
+            real_trading_enabled=real_trading_enabled,
+        )
+
+    def _build_domestic_order_payload(
+        self,
+        *,
+        side: str,
+        symbol: str,
+        quantity: int,
+        price: int,
+        order_type: str,
+    ) -> dict[str, str]:
+        if not self.account_no or not self.account_product_code:
+            raise ValueError("KIS_ACCOUNT_NO and KIS_ACCOUNT_PRODUCT_CODE are required.")
+        return {
+            "CANO": self.account_no,
+            "ACNT_PRDT_CD": self.account_product_code,
+            "PDNO": symbol.strip(),
+            "ORD_DVSN": _domestic_order_type_code(order_type),
+            "ORD_QTY": str(_positive_int(quantity, "quantity")),
+            "ORD_UNPR": str(int(_non_negative_float(price, "price"))),
+        }
+
+    def _build_overseas_order_payload(
+        self,
+        *,
+        symbol: str,
+        quantity: int,
+        price: float,
+        exchange: str,
+        order_type: str,
+    ) -> dict[str, str]:
+        if not self.account_no or not self.account_product_code:
+            raise ValueError("KIS_ACCOUNT_NO and KIS_ACCOUNT_PRODUCT_CODE are required.")
+        return {
+            "CANO": self.account_no,
+            "ACNT_PRDT_CD": self.account_product_code,
+            "OVRS_EXCG_CD": _overseas_order_exchange_code(exchange),
+            "PDNO": symbol.strip().upper(),
+            "ORD_QTY": str(_positive_int(quantity, "quantity")),
+            "OVRS_ORD_UNPR": _format_overseas_price(price, order_type),
+            "ORD_SVR_DVSN_CD": "0",
+            "ORD_DVSN": _overseas_order_type_code(order_type),
+        }
+
 
 def summarize_domestic_balance(payload: dict[str, Any]) -> dict[str, Any]:
     holdings = payload.get("output1") or []
@@ -148,6 +340,28 @@ def summarize_domestic_balance(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _order_payload_to_result(
+    market: str,
+    side: str,
+    symbol: str,
+    quantity: int,
+    price: float,
+    payload: dict[str, Any],
+) -> OrderResult:
+    output = _first_dict(payload.get("output"))
+    order_no = output.get("ODNO") or output.get("odno")
+    return OrderResult(
+        market=market,
+        side=side,
+        symbol=symbol,
+        quantity=quantity,
+        price=price,
+        order_no=str(order_no) if order_no else None,
+        message=str(payload.get("msg1") or "order accepted"),
+        raw=payload,
+    )
+
+
 def _checked_payload(response: httpx.Response, message: str) -> dict[str, Any]:
     if response.status_code >= 400:
         raise RuntimeError(f"{message}: {response.status_code} {response.text}")
@@ -156,6 +370,80 @@ def _checked_payload(response: httpx.Response, message: str) -> dict[str, Any]:
     if str(payload.get("rt_cd")) not in ("0", "None"):
         raise RuntimeError(f"{message}: {payload.get('msg1') or payload}")
     return payload
+
+
+def _normalize_side(side: str) -> str:
+    normalized = side.strip().lower()
+    if normalized in {"buy", "bid"}:
+        return "buy"
+    if normalized in {"sell", "ask"}:
+        return "sell"
+    raise ValueError("side must be buy or sell.")
+
+
+def _normalize_order_type(order_type: str) -> str:
+    normalized = order_type.strip().lower()
+    if normalized in {"limit", "market"}:
+        return normalized
+    raise ValueError("order_type must be limit or market.")
+
+
+def _domestic_order_type_code(order_type: str) -> str:
+    normalized = _normalize_order_type(order_type)
+    if normalized == "market":
+        return "01"
+    return "00"
+
+
+def _overseas_order_type_code(order_type: str) -> str:
+    _normalize_order_type(order_type)
+    return "00"
+
+
+def _overseas_order_exchange_code(exchange: str) -> str:
+    normalized = exchange.strip().upper()
+    aliases = {
+        "NAS": "NASD",
+        "NASDAQ": "NASD",
+        "NASD": "NASD",
+        "NYS": "NYSE",
+        "NYSE": "NYSE",
+        "AMS": "AMEX",
+        "AMEX": "AMEX",
+        "ASE": "AMEX",
+    }
+    if normalized not in aliases:
+        raise ValueError("exchange must be one of NAS, NASD, NYS, NYSE, AMS, AMEX, ASE.")
+    return aliases[normalized]
+
+
+def _format_overseas_price(price: float, order_type: str) -> str:
+    if _normalize_order_type(order_type) == "market":
+        return "0"
+    normalized = _non_negative_float(price, "price")
+    if normalized <= 0:
+        raise ValueError("price must be greater than zero for limit orders.")
+    return f"{normalized:.2f}"
+
+
+def _positive_int(value: int, field_name: str) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be a positive integer.") from exc
+    if number <= 0:
+        raise ValueError(f"{field_name} must be a positive integer.")
+    return number
+
+
+def _non_negative_float(value: float, field_name: str) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be a non-negative number.") from exc
+    if number < 0:
+        raise ValueError(f"{field_name} must be a non-negative number.")
+    return number
 
 
 def _domestic_output_to_snapshot(symbol: str, name: str | None, output: dict[str, Any]) -> PriceSnapshot:

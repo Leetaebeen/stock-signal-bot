@@ -90,6 +90,27 @@ class KisAuthClient:
         self._save_cached_token(token)
         return token
 
+    def make_hashkey(self, payload: dict[str, Any]) -> str:
+        if not self.app_key or not self.app_secret:
+            raise ValueError("KIS_APP_KEY and KIS_APP_SECRET are required.")
+
+        response = self.http_client.post(
+            f"{self.base_url}/uapi/hashkey",
+            headers={
+                "content-type": "application/json; charset=utf-8",
+                "appkey": self.app_key,
+                "appsecret": self.app_secret,
+            },
+            json=payload,
+        )
+        if response.status_code >= 400:
+            raise RuntimeError(f"KIS hashkey request failed: {response.status_code} {response.text}")
+
+        hashkey = response.json().get("HASH")
+        if not hashkey:
+            raise RuntimeError(f"KIS hashkey response has no HASH: {response.text}")
+        return str(hashkey)
+
     def _parse_token_response(self, payload: dict[str, Any]) -> KisToken:
         access_token = payload.get("access_token")
         if not access_token:

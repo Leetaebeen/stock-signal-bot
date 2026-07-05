@@ -1,3 +1,5 @@
+import json
+
 import httpx
 
 from app.brokers.kis_client import KisClient, summarize_domestic_balance
@@ -158,3 +160,121 @@ def test_kis_client_refreshes_token_once_when_server_reports_expired_token(tmp_p
     assert snapshot.price == 78500
     assert token_requests == 2
     assert quote_authorizations == ["Bearer old-token", "Bearer fresh-token"]
+
+
+def test_domestic_order_is_blocked_when_order_disabled(tmp_path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("order-disabled guard should block network calls")
+
+    client = KisClient(
+        app_key="app-key",
+        app_secret="app-secret",
+        account_no="12345678",
+        account_product_code="01",
+        env="paper",
+        token_cache_path=str(tmp_path / "kis_token.json"),
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    try:
+        client.place_domestic_order(
+            side="buy",
+            symbol="005930",
+            quantity=1,
+            price=78000,
+            order_enabled=False,
+            paper_trading_only=True,
+            real_trading_enabled=False,
+        )
+    except RuntimeError as exc:
+        assert "ORDER_ENABLED" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError")
+
+
+def test_place_domestic_paper_buy_order_uses_hashkey_and_paper_tr_id(tmp_path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth2/tokenP":
+            return httpx.Response(200, json={"access_token": "token", "token_type": "Bearer", "expires_in": 3600})
+        if request.url.path == "/uapi/hashkey":
+            assert request.headers["appkey"] == "app-key"
+            assert json.loads(request.content)["PDNO"] == "005930"
+            return httpx.Response(200, json={"HASH": "sample-hash"})
+        if request.url.path == "/uapi/domestic-stock/v1/trading/order-cash":
+            payload = json.loads(request.content)
+            assert request.headers["tr_id"] == "VTTC0802U"
+            assert request.headers["hashkey"] == "sample-hash"
+            assert payload["CANO"] == "12345678"
+            assert payload["ACNT_PRDT_CD"] == "01"
+            assert payload["PDNO"] == "005930"
+            assert payload["ORD_QTY"] == "1"
+            assert payload["ORD_UNPR"] == "78000"
+            return httpx.Response(200, json={"rt_cd": "0", "msg1": "accepted", "output": {"ODNO": "000001"}})
+        return httpx.Response(404)
+
+    client = KisClient(
+        app_key="app-key",
+        app_secret="app-secret",
+        account_no="12345678",
+        account_product_code="01",
+        env="paper",
+        token_cache_path=str(tmp_path / "kis_token.json"),
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    result = client.place_domestic_order(
+        side="buy",
+        symbol="005930",
+        quantity=1,
+        price=78000,
+        order_enabled=True,
+        paper_trading_only=True,
+        real_trading_enabled=False,
+    )
+
+    assert result.market == "KR"
+    assert result.side == "buy"
+    assert result.order_no == "000001"
+
+
+def test_place_overseas_paper_sell_order_maps_exchange_and_tr_id(tmp_path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth2/tokenP":
+            return httpx.Response(200, json={"access_token": "token", "token_type": "Bearer", "expires_in": 3600})
+        if request.url.path == "/uapi/hashkey":
+            assert json.loads(request.content)["OVRS_EXCG_CD"] == "NASD"
+            return httpx.Response(200, json={"HASH": "sample-hash"})
+        if request.url.path == "/uapi/overseas-stock/v1/trading/order":
+            payload = json.loads(request.content)
+            assert request.headers["tr_id"] == "VTTT1001U"
+            assert payload["OVRS_EXCG_CD"] == "NASD"
+            assert payload["PDNO"] == "NVDA"
+            assert payload["ORD_QTY"] == "1"
+            assert payload["OVRS_ORD_UNPR"] == "144.20"
+            return httpx.Response(200, json={"rt_cd": "0", "msg1": "accepted", "output": {"ODNO": "000002"}})
+        return httpx.Response(404)
+
+    client = KisClient(
+        app_key="app-key",
+        app_secret="app-secret",
+        account_no="12345678",
+        account_product_code="01",
+        env="paper",
+        token_cache_path=str(tmp_path / "kis_token.json"),
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    result = client.place_overseas_order(
+        side="sell",
+        symbol="nvda",
+        quantity=1,
+        price=144.2,
+        exchange="NAS",
+        order_enabled=True,
+        paper_trading_only=True,
+        real_trading_enabled=False,
+    )
+
+    assert result.market == "US"
+    assert result.side == "sell"
+    assert result.order_no == "000002"
