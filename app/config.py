@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     telegram_enabled: bool = False
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
+    telegram_notify_startup: bool = False
+    telegram_notify_signals: bool = False
+    telegram_notify_trades: bool = True
+    telegram_notify_errors: bool = True
 
     paper_trading_only: bool = True
     order_enabled: bool = False
