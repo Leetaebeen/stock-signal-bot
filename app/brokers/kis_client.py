@@ -187,8 +187,9 @@ class KisClient:
             price=price,
             exchange=exchange,
             order_type=order_type,
+            session=normalized_session,
         )
-        tr_id = "VTTT1002U" if normalized_side == "buy" else "VTTT1001U"
+        tr_id = _overseas_order_tr_id(normalized_side, normalized_session)
         path = _overseas_order_path(normalized_session)
         response = self._post_with_auth_retry(
             path,
@@ -322,10 +323,11 @@ class KisClient:
         price: float,
         exchange: str,
         order_type: str,
+        session: str = "regular",
     ) -> dict[str, str]:
         if not self.account_no or not self.account_product_code:
             raise ValueError("KIS_ACCOUNT_NO and KIS_ACCOUNT_PRODUCT_CODE are required.")
-        return {
+        payload = {
             "CANO": self.account_no,
             "ACNT_PRDT_CD": self.account_product_code,
             "OVRS_EXCG_CD": _overseas_order_exchange_code(exchange),
@@ -335,6 +337,10 @@ class KisClient:
             "ORD_SVR_DVSN_CD": "0",
             "ORD_DVSN": _overseas_order_type_code(order_type),
         }
+        if _normalize_overseas_session(session) == "day":
+            payload["CTAC_TLNO"] = " "
+            payload["MGCO_APTM_ODNO"] = ""
+        return payload
 
 
 def summarize_domestic_balance(payload: dict[str, Any]) -> dict[str, Any]:
@@ -410,6 +416,14 @@ def _domestic_order_type_code(order_type: str) -> str:
 def _overseas_order_type_code(order_type: str) -> str:
     _normalize_order_type(order_type)
     return "00"
+
+
+def _overseas_order_tr_id(side: str, session: str) -> str:
+    normalized_side = _normalize_side(side)
+    normalized_session = _normalize_overseas_session(session)
+    if normalized_session == "day":
+        return "VTTT6036U" if normalized_side == "buy" else "VTTT6037U"
+    return "VTTT1002U" if normalized_side == "buy" else "VTTT1001U"
 
 
 def _normalize_overseas_session(session: str) -> str:

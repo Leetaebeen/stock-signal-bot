@@ -291,11 +291,13 @@ def test_place_overseas_day_session_uses_daytime_order_path(tmp_path):
             return httpx.Response(200, json={"HASH": "sample-hash"})
         if request.url.path == "/uapi/overseas-stock/v1/trading/daytime-order":
             payload = json.loads(request.content)
-            assert request.headers["tr_id"] == "VTTT1002U"
+            assert request.headers["tr_id"] == "VTTT6036U"
             assert payload["OVRS_EXCG_CD"] == "NASD"
             assert payload["PDNO"] == "NVDA"
             assert payload["ORD_QTY"] == "1"
             assert payload["OVRS_ORD_UNPR"] == "144.20"
+            assert payload["CTAC_TLNO"] == " "
+            assert payload["MGCO_APTM_ODNO"] == ""
             return httpx.Response(200, json={"rt_cd": "0", "msg1": "accepted", "output": {"ODNO": "000003"}})
         return httpx.Response(404)
 
