@@ -15,15 +15,15 @@ def test_build_buy_fill_message():
             side="BUY",
             quantity=1,
             price=195.2,
-            reason="거래량 증가 + VWAP 위",
+            reason="거래량 증가 + 전략 조건 통과",
             filled_at=datetime(2026, 7, 5, 21, 35, 12, tzinfo=KST),
         )
     )
 
     assert "[모의 매수 체결]" in message
     assert "종목: 엔비디아 (NVDA)" in message
-    assert "매수가: 195.20달러" in message
-    assert "주문금액: 195.20달러" in message
+    assert "매수가: $195.20" in message
+    assert "주문금액: $195.20" in message
 
 
 def test_build_sell_fill_message():
@@ -36,17 +36,17 @@ def test_build_sell_fill_message():
             quantity=1,
             price=201.1,
             entry_price=195.2,
-            reason="1차 익절",
+            reason="익절 기준 도달",
             holding_seconds=492,
             filled_at=datetime(2026, 7, 5, 21, 43, 24, tzinfo=KST),
         )
     )
 
     assert "[모의 매도 체결]" in message
-    assert "매수가: 195.20달러" in message
-    assert "매도가: 201.10달러" in message
+    assert "매수가: $195.20" in message
+    assert "매도가: $201.10" in message
     assert "수익률: +3.02%" in message
-    assert "손익: +5.90달러" in message
+    assert "손익: +$5.90" in message
     assert "보유 시간: 8분 12초" in message
 
 

@@ -99,7 +99,7 @@ def _side_label(side: str) -> str:
 def _format_price(value: float, currency: str) -> str:
     if currency.upper() == "KRW":
         return f"{value:,.0f}원"
-    return f"{value:,.2f}달러"
+    return f"${value:,.2f}"
 
 
 def _format_signed_price(value: float, currency: str) -> str:
@@ -113,7 +113,7 @@ def _format_quantity(value: float) -> str:
 
 def _format_duration(seconds: int | None) -> str:
     if seconds is None or seconds < 0:
-        return "확인 안 됨"
+        return "확인 불가"
     minutes, sec = divmod(seconds, 60)
     hours, minutes = divmod(minutes, 60)
     if hours:
