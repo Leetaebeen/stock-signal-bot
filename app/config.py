@@ -28,6 +28,19 @@ class Settings(BaseSettings):
     order_enabled: bool = False
     real_trading_enabled: bool = False
 
+    trading_state_path: str = "data/paper_positions.json"
+    trading_default_quantity: int = 1
+    entry_min_change_pct: float = 3.0
+    entry_max_change_pct: float = 30.0
+    entry_min_volume_ratio: float = 4.0
+    entry_max_volume_ratio: float = 20.0
+    entry_min_trading_value_krw: float = 1_000_000_000
+    take_profit_pct: float = 5.0
+    stop_loss_pct: float = -2.0
+    trailing_start_pct: float = 3.0
+    trailing_drawdown_pct: float = 1.5
+    max_hold_seconds: int = 1800
+
 
 @lru_cache
 def get_settings() -> Settings:

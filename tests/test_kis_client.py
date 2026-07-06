@@ -234,6 +234,7 @@ def test_place_domestic_paper_buy_order_uses_hashkey_and_paper_tr_id(tmp_path):
 
     assert result.market == "KR"
     assert result.side == "buy"
+    assert result.session == "regular"
     assert result.order_no == "000001"
 
 
@@ -277,4 +278,83 @@ def test_place_overseas_paper_sell_order_maps_exchange_and_tr_id(tmp_path):
 
     assert result.market == "US"
     assert result.side == "sell"
+    assert result.session == "regular"
     assert result.order_no == "000002"
+
+
+def test_place_overseas_day_session_uses_daytime_order_path(tmp_path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth2/tokenP":
+            return httpx.Response(200, json={"access_token": "token", "token_type": "Bearer", "expires_in": 3600})
+        if request.url.path == "/uapi/hashkey":
+            assert json.loads(request.content)["PDNO"] == "NVDA"
+            return httpx.Response(200, json={"HASH": "sample-hash"})
+        if request.url.path == "/uapi/overseas-stock/v1/trading/daytime-order":
+            payload = json.loads(request.content)
+            assert request.headers["tr_id"] == "VTTT1002U"
+            assert payload["OVRS_EXCG_CD"] == "NASD"
+            assert payload["PDNO"] == "NVDA"
+            assert payload["ORD_QTY"] == "1"
+            assert payload["OVRS_ORD_UNPR"] == "144.20"
+            return httpx.Response(200, json={"rt_cd": "0", "msg1": "accepted", "output": {"ODNO": "000003"}})
+        return httpx.Response(404)
+
+    client = KisClient(
+        app_key="app-key",
+        app_secret="app-secret",
+        account_no="12345678",
+        account_product_code="01",
+        env="paper",
+        token_cache_path=str(tmp_path / "kis_token.json"),
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    result = client.place_overseas_order(
+        side="buy",
+        symbol="NVDA",
+        quantity=1,
+        price=144.2,
+        exchange="NAS",
+        session="day",
+        order_enabled=True,
+        paper_trading_only=True,
+        real_trading_enabled=False,
+    )
+
+    assert result.market == "US"
+    assert result.side == "buy"
+    assert result.session == "day"
+    assert result.order_no == "000003"
+
+
+def test_overseas_extended_session_rejects_market_order(tmp_path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("market orders outside regular session should be blocked before network calls")
+
+    client = KisClient(
+        app_key="app-key",
+        app_secret="app-secret",
+        account_no="12345678",
+        account_product_code="01",
+        env="paper",
+        token_cache_path=str(tmp_path / "kis_token.json"),
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    try:
+        client.place_overseas_order(
+            side="buy",
+            symbol="NVDA",
+            quantity=1,
+            price=0,
+            exchange="NAS",
+            order_type="market",
+            session="pre",
+            order_enabled=True,
+            paper_trading_only=True,
+            real_trading_enabled=False,
+        )
+    except ValueError as exc:
+        assert "limit" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")

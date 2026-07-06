@@ -56,9 +56,14 @@ python -m app.tools.telegram_test
 ```powershell
 python -m app.tools.kis_order_check KR buy 005930 --qty 1 --price 78000
 python -m app.tools.kis_order_check US buy NVDA --qty 1 --price 144.2 --exchange NAS
+python -m app.tools.kis_order_check US buy NVDA --qty 1 --price 160 --exchange NAS --session day
+python -m app.tools.kis_order_check US buy NVDA --qty 1 --price 160 --exchange NAS --session pre
+python -m app.tools.kis_order_check US buy NVDA --qty 1 --price 160 --exchange NAS --session after
 ```
 
 실제 모의 주문 테스트는 나중에 `ORDER_ENABLED=true`로 바꾸고 `--execute`를 붙여서 1주 단위로만 진행합니다.
+
+미국 주식 세션은 `regular`, `day`, `pre`, `after`를 지원합니다. 정규장 외 세션은 시장가 대신 지정가 주문만 허용합니다.
 
 ## 텔레그램 알림 정책
 

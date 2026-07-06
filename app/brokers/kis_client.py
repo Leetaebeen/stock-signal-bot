@@ -30,6 +30,7 @@ class OrderRequest:
     price: float
     order_type: str = "limit"
     exchange: str | None = None
+    session: str = "regular"
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,7 @@ class OrderResult:
     symbol: str
     quantity: int
     price: float
+    session: str
     order_no: str | None
     message: str
     raw: dict[str, Any]
@@ -158,7 +160,7 @@ class KisClient:
             payload=payload,
         )
         checked = _checked_payload(response, "KIS domestic order request failed")
-        return _order_payload_to_result("KR", normalized_side, symbol, quantity, price, checked)
+        return _order_payload_to_result("KR", normalized_side, symbol, quantity, price, "regular", checked)
 
     def place_overseas_order(
         self,
@@ -169,12 +171,16 @@ class KisClient:
         price: float,
         exchange: str = "NAS",
         order_type: str = "limit",
+        session: str = "regular",
         order_enabled: bool,
         paper_trading_only: bool,
         real_trading_enabled: bool,
     ) -> OrderResult:
         self._assert_order_allowed(order_enabled, paper_trading_only, real_trading_enabled)
         normalized_side = _normalize_side(side)
+        normalized_session = _normalize_overseas_session(session)
+        if normalized_session != "regular" and _normalize_order_type(order_type) == "market":
+            raise ValueError("US day/pre/after session orders must use limit order_type.")
         payload = self._build_overseas_order_payload(
             symbol=symbol,
             quantity=quantity,
@@ -183,13 +189,14 @@ class KisClient:
             order_type=order_type,
         )
         tr_id = "VTTT1002U" if normalized_side == "buy" else "VTTT1001U"
+        path = _overseas_order_path(normalized_session)
         response = self._post_with_auth_retry(
-            "/uapi/overseas-stock/v1/trading/order",
+            path,
             tr_id=tr_id,
             payload=payload,
         )
         checked = _checked_payload(response, "KIS overseas order request failed")
-        return _order_payload_to_result("US", normalized_side, symbol, quantity, price, checked)
+        return _order_payload_to_result("US", normalized_side, symbol, quantity, price, normalized_session, checked)
 
     def build_order_request(
         self,
@@ -201,10 +208,12 @@ class KisClient:
         price: float,
         exchange: str | None = None,
         order_type: str = "limit",
+        session: str = "regular",
     ) -> OrderRequest:
         normalized_market = market.strip().upper()
         if normalized_market not in {"KR", "US"}:
             raise ValueError("market must be KR or US.")
+        normalized_session = "regular" if normalized_market == "KR" else _normalize_overseas_session(session)
         return OrderRequest(
             market=normalized_market,
             side=_normalize_side(side),
@@ -213,6 +222,7 @@ class KisClient:
             price=_non_negative_float(price, "price"),
             exchange=exchange,
             order_type=_normalize_order_type(order_type),
+            session=normalized_session,
         )
 
     def _get_with_auth_retry(self, path: str, tr_id: str, params: dict[str, Any]) -> httpx.Response:
@@ -346,6 +356,7 @@ def _order_payload_to_result(
     symbol: str,
     quantity: int,
     price: float,
+    session: str,
     payload: dict[str, Any],
 ) -> OrderResult:
     output = _first_dict(payload.get("output"))
@@ -356,6 +367,7 @@ def _order_payload_to_result(
         symbol=symbol,
         quantity=quantity,
         price=price,
+        session=session,
         order_no=str(order_no) if order_no else None,
         message=str(payload.get("msg1") or "order accepted"),
         raw=payload,
@@ -398,6 +410,34 @@ def _domestic_order_type_code(order_type: str) -> str:
 def _overseas_order_type_code(order_type: str) -> str:
     _normalize_order_type(order_type)
     return "00"
+
+
+def _normalize_overseas_session(session: str) -> str:
+    normalized = session.strip().lower()
+    aliases = {
+        "regular": "regular",
+        "rth": "regular",
+        "normal": "regular",
+        "day": "day",
+        "daytime": "day",
+        "day-market": "day",
+        "pre": "pre",
+        "premarket": "pre",
+        "pre-market": "pre",
+        "after": "after",
+        "aftermarket": "after",
+        "after-market": "after",
+    }
+    if normalized not in aliases:
+        raise ValueError("session must be one of regular, day, pre, after.")
+    return aliases[normalized]
+
+
+def _overseas_order_path(session: str) -> str:
+    normalized = _normalize_overseas_session(session)
+    if normalized == "day":
+        return "/uapi/overseas-stock/v1/trading/daytime-order"
+    return "/uapi/overseas-stock/v1/trading/order"
 
 
 def _overseas_order_exchange_code(exchange: str) -> str:

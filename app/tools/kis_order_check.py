@@ -13,6 +13,7 @@ def main() -> None:
     parser.add_argument("--price", type=float, required=True)
     parser.add_argument("--exchange", default="NAS")
     parser.add_argument("--order-type", choices=["limit", "market"], default="limit")
+    parser.add_argument("--session", choices=["regular", "day", "pre", "after"], default="regular")
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
 
@@ -33,6 +34,7 @@ def main() -> None:
         price=args.price,
         exchange=args.exchange,
         order_type=args.order_type,
+        session=args.session,
     )
 
     print("KIS paper order check.")
@@ -43,7 +45,7 @@ def main() -> None:
     print(
         "request="
         f"{request.market} {request.side} {request.symbol} qty={request.quantity} "
-        f"price={request.price:g} type={request.order_type}"
+        f"price={request.price:g} type={request.order_type} session={request.session}"
     )
 
     if not args.execute:
@@ -70,6 +72,7 @@ def main() -> None:
             price=request.price,
             exchange=request.exchange or args.exchange,
             order_type=request.order_type,
+            session=request.session,
             order_enabled=settings.order_enabled,
             paper_trading_only=settings.paper_trading_only,
             real_trading_enabled=settings.real_trading_enabled,
