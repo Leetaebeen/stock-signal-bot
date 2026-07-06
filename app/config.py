@@ -41,6 +41,15 @@ class Settings(BaseSettings):
     trailing_drawdown_pct: float = 1.5
     max_hold_seconds: int = 1800
 
+    auto_trading_enabled: bool = False
+    scan_interval_seconds: int = 60
+    scan_candidate_limit: int = 5
+    us_scan_symbols: str = "HOOD,NVDA,PLTR,TSLA,AMD,SOXL"
+    us_scan_symbols_path: str | None = None
+    quote_request_delay_seconds: float = 1.1
+    us_order_exchange: str = "NAS"
+    us_order_session: str = "regular"
+
 
 @lru_cache
 def get_settings() -> Settings:
