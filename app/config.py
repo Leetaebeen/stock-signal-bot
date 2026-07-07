@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     quote_request_delay_seconds: float = 1.1
     us_order_exchange: str = "NAS"
     us_order_session: str = "regular"
+    allow_kr_regular_trading: bool = True
+    allow_us_regular_trading: bool = True
+    allow_us_extended_trading: bool = False
 
 
 @lru_cache

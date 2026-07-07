@@ -36,6 +36,9 @@ class FakeSettings:
     kr_scan_symbols = "005930, 000660, 005930"
     kr_scan_symbols_path = None
     quote_request_delay_seconds = 0.0
+    allow_kr_regular_trading = True
+    allow_us_regular_trading = True
+    allow_us_extended_trading = False
 
 
 def test_runtime_dedupes_us_and_kr_symbols():

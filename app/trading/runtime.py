@@ -5,6 +5,7 @@ from app.brokers.kis_client import KisClient
 from app.config import Settings
 from app.scanners.momentum import MomentumScanner, TradingValueBaseline, load_symbols_from_file, parse_symbol_list
 from app.trading.executor import ExecutionConfig, ExecutionResult, TradingExecutor
+from app.trading.sessions import SessionPolicy, market_closed_reason
 from app.trading.state import JsonPositionStore
 from app.trading.strategy import StrategyRules
 
@@ -49,6 +50,11 @@ class TradingRuntime:
                 chat_id=settings.telegram_chat_id,
             ),
         )
+        self.session_policy = SessionPolicy(
+            allow_kr_regular=settings.allow_kr_regular_trading,
+            allow_us_regular=settings.allow_us_regular_trading,
+            allow_us_extended=settings.allow_us_extended_trading,
+        )
 
     def run_once(self) -> list[ExecutionResult]:
         candidates = []
@@ -63,10 +69,19 @@ class TradingRuntime:
             return []
         results: list[ExecutionResult] = []
         for candidate in sorted(candidates, key=lambda item: item.score, reverse=True)[: self.settings.scan_candidate_limit]:
+            if not self._can_trade(candidate.signal.market):
+                reason = market_closed_reason(candidate.signal.market, session=self.settings.us_order_session)
+                logger.info("scan result symbol=%s action=SKIP reason=%s", candidate.signal.symbol, reason)
+                results.append(ExecutionResult("SKIP", candidate.signal.symbol, reason))
+                continue
             result = self.executor.handle_signal(candidate.signal)
             logger.info("scan result symbol=%s action=%s reason=%s", result.symbol, result.action, result.reason)
             results.append(result)
         return results
+
+    def _can_trade(self, market: str) -> bool:
+        session = self.settings.us_order_session if market.upper() == "US" else "regular"
+        return self.session_policy.is_market_open(market, session=session)
 
     def _us_symbols(self) -> list[str]:
         symbols = parse_symbol_list(self.settings.us_scan_symbols)
