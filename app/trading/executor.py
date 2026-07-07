@@ -10,6 +10,20 @@ from app.trading.strategy import KST, MarketSignal, Position, StrategyRules, eva
 
 
 class TradingBroker(Protocol):
+    def place_domestic_order(
+        self,
+        *,
+        side: str,
+        symbol: str,
+        quantity: int,
+        price: int,
+        order_type: str = "limit",
+        order_enabled: bool,
+        paper_trading_only: bool,
+        real_trading_enabled: bool,
+    ) -> OrderResult:
+        ...
+
     def place_overseas_order(
         self,
         *,
@@ -77,17 +91,11 @@ class TradingExecutor:
             return ExecutionResult("HOLD", signal.symbol, decision.reason)
 
         try:
-            order = self.broker.place_overseas_order(
+            order = self._place_order(
                 side="buy",
-                symbol=signal.symbol,
+                signal=signal,
                 quantity=self.config.quantity,
                 price=signal.price,
-                exchange=self.config.exchange,
-                order_type=self.config.order_type,
-                session=self.config.session,
-                order_enabled=self.config.order_enabled,
-                paper_trading_only=self.config.paper_trading_only,
-                real_trading_enabled=self.config.real_trading_enabled,
             )
         except Exception as exc:
             self._notify_failure(signal, "BUY", str(exc))
@@ -124,17 +132,11 @@ class TradingExecutor:
             return ExecutionResult("HOLD", signal.symbol, decision.reason)
 
         try:
-            order = self.broker.place_overseas_order(
+            order = self._place_order(
                 side="sell",
-                symbol=signal.symbol,
+                signal=signal,
                 quantity=int(updated.quantity),
                 price=signal.price,
-                exchange=self.config.exchange,
-                order_type=self.config.order_type,
-                session=self.config.session,
-                order_enabled=self.config.order_enabled,
-                paper_trading_only=self.config.paper_trading_only,
-                real_trading_enabled=self.config.real_trading_enabled,
             )
         except Exception as exc:
             self._notify_failure(signal, "SELL", str(exc))
@@ -158,6 +160,31 @@ class TradingExecutor:
             )
         )
         return ExecutionResult("SELL", signal.symbol, decision.reason, order_no=order.order_no)
+
+    def _place_order(self, *, side: str, signal: MarketSignal, quantity: int, price: float) -> OrderResult:
+        if signal.market.upper() == "KR":
+            return self.broker.place_domestic_order(
+                side=side,
+                symbol=signal.symbol,
+                quantity=quantity,
+                price=int(price),
+                order_type=self.config.order_type,
+                order_enabled=self.config.order_enabled,
+                paper_trading_only=self.config.paper_trading_only,
+                real_trading_enabled=self.config.real_trading_enabled,
+            )
+        return self.broker.place_overseas_order(
+            side=side,
+            symbol=signal.symbol,
+            quantity=quantity,
+            price=price,
+            exchange=self.config.exchange,
+            order_type=self.config.order_type,
+            session=self.config.session,
+            order_enabled=self.config.order_enabled,
+            paper_trading_only=self.config.paper_trading_only,
+            real_trading_enabled=self.config.real_trading_enabled,
+        )
 
     def _notify_fill(self, fill: TradeFill) -> None:
         if self.alerter and self.config.notify_trades:

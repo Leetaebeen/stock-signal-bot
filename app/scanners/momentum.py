@@ -13,6 +13,9 @@ logger = logging.getLogger(__name__)
 
 
 class QuoteClient(Protocol):
+    def get_domestic_price(self, symbol: str, name: str | None = None) -> PriceSnapshot:
+        ...
+
     def get_overseas_price(self, symbol: str, exchange: str = "NAS", name: str | None = None) -> PriceSnapshot:
         ...
 
@@ -53,13 +56,22 @@ class MomentumScanner:
         self.request_delay_seconds = request_delay_seconds
 
     def scan_us(self, symbols: Iterable[str], limit: int = 5) -> list[ScanCandidate]:
+        return self._scan(symbols, market="US", limit=limit)
+
+    def scan_kr(self, symbols: Iterable[str], limit: int = 5) -> list[ScanCandidate]:
+        return self._scan(symbols, market="KR", limit=limit)
+
+    def _scan(self, symbols: Iterable[str], *, market: str, limit: int) -> list[ScanCandidate]:
         candidates: list[ScanCandidate] = []
         observed_at = datetime.now(KST)
-        for index, symbol in enumerate(_clean_symbols(symbols)):
-            if index and self.request_delay_seconds > 0:
+        for symbol in _clean_symbols(symbols):
+            if self.request_delay_seconds > 0:
                 time.sleep(self.request_delay_seconds)
             try:
-                snapshot = self.quote_client.get_overseas_price(symbol, exchange=self.exchange)
+                if market == "KR":
+                    snapshot = self.quote_client.get_domestic_price(symbol)
+                else:
+                    snapshot = self.quote_client.get_overseas_price(symbol, exchange=self.exchange)
             except Exception as exc:
                 logger.warning("quote skipped symbol=%s reason=%s", symbol, exc)
                 continue
@@ -67,7 +79,7 @@ class MomentumScanner:
             signal = MarketSignal(
                 symbol=snapshot.symbol,
                 name=snapshot.name,
-                market="US",
+                market=market,
                 price=snapshot.price,
                 change_pct=snapshot.change_pct,
                 volume_ratio=volume_ratio,
@@ -77,7 +89,7 @@ class MomentumScanner:
             candidates.append(
                 ScanCandidate(
                     signal=signal,
-                    source="kis_overseas_quote",
+                    source=f"kis_{market.lower()}_quote",
                     score=_score_signal(signal),
                 )
             )

@@ -33,10 +33,13 @@ class FakeSettings:
     scan_candidate_limit = 5
     us_scan_symbols = "NVDA, HOOD, NVDA"
     us_scan_symbols_path = None
+    kr_scan_symbols = "005930, 000660, 005930"
+    kr_scan_symbols_path = None
     quote_request_delay_seconds = 0.0
 
 
-def test_runtime_dedupes_symbols():
+def test_runtime_dedupes_us_and_kr_symbols():
     runtime = TradingRuntime(FakeSettings())
 
-    assert runtime._symbols() == ["NVDA", "HOOD"]
+    assert runtime._us_symbols() == ["NVDA", "HOOD"]
+    assert runtime._kr_symbols() == ["005930", "000660"]

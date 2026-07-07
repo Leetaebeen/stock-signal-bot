@@ -6,6 +6,9 @@ class FakeQuoteClient:
     def __init__(self, snapshots):
         self.snapshots = snapshots
 
+    def get_domestic_price(self, symbol: str, name: str | None = None):
+        return self.snapshots[symbol]
+
     def get_overseas_price(self, symbol: str, exchange: str = "NAS", name: str | None = None):
         return self.snapshots[symbol]
 
@@ -35,3 +38,19 @@ def test_momentum_scanner_returns_sorted_candidates():
 
     assert [candidate.signal.symbol for candidate in candidates] == ["BBB", "AAA"]
     assert candidates[0].signal.volume_ratio == 1.0
+
+
+def test_momentum_scanner_scans_kr_symbols():
+    scanner = MomentumScanner(
+        quote_client=FakeQuoteClient(
+            {
+                "005930": PriceSnapshot("005930", "삼성전자", "KR", 78000, 4.0, 2_000_000_000),
+            }
+        )
+    )
+
+    candidates = scanner.scan_kr(["005930"], limit=1)
+
+    assert candidates[0].signal.market == "KR"
+    assert candidates[0].signal.name == "삼성전자"
+    assert candidates[0].source == "kis_kr_quote"

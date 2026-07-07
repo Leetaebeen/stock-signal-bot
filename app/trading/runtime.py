@@ -51,21 +51,35 @@ class TradingRuntime:
         )
 
     def run_once(self) -> list[ExecutionResult]:
-        symbols = self._symbols()
-        if not symbols:
+        candidates = []
+        us_symbols = self._us_symbols()
+        kr_symbols = self._kr_symbols()
+        if us_symbols:
+            candidates.extend(self.scanner.scan_us(us_symbols, limit=self.settings.scan_candidate_limit))
+        if kr_symbols:
+            candidates.extend(self.scanner.scan_kr(kr_symbols, limit=self.settings.scan_candidate_limit))
+        if not candidates:
             logger.info("scan skipped: no symbols configured")
             return []
-        candidates = self.scanner.scan_us(symbols, limit=self.settings.scan_candidate_limit)
         results: list[ExecutionResult] = []
-        for candidate in candidates:
+        for candidate in sorted(candidates, key=lambda item: item.score, reverse=True)[: self.settings.scan_candidate_limit]:
             result = self.executor.handle_signal(candidate.signal)
             logger.info("scan result symbol=%s action=%s reason=%s", result.symbol, result.action, result.reason)
             results.append(result)
         return results
 
-    def _symbols(self) -> list[str]:
+    def _us_symbols(self) -> list[str]:
         symbols = parse_symbol_list(self.settings.us_scan_symbols)
         symbols.extend(load_symbols_from_file(self.settings.us_scan_symbols_path))
+        return _dedupe(symbols)
+
+    def _kr_symbols(self) -> list[str]:
+        symbols = parse_symbol_list(self.settings.kr_scan_symbols)
+        symbols.extend(load_symbols_from_file(self.settings.kr_scan_symbols_path))
+        return _dedupe(symbols)
+
+
+def _dedupe(symbols: list[str]) -> list[str]:
         deduped: list[str] = []
         for symbol in symbols:
             if symbol not in deduped:

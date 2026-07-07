@@ -18,10 +18,15 @@ def main() -> None:
         exchange=settings.us_order_exchange,
         request_delay_seconds=settings.quote_request_delay_seconds,
     )
-    candidates = scanner.scan_us(parse_symbol_list(settings.us_scan_symbols), limit=settings.scan_candidate_limit)
+    us_candidates = scanner.scan_us(parse_symbol_list(settings.us_scan_symbols), limit=settings.scan_candidate_limit)
+    kr_candidates = scanner.scan_kr(parse_symbol_list(settings.kr_scan_symbols), limit=settings.scan_candidate_limit)
+    candidates = sorted([*us_candidates, *kr_candidates], key=lambda item: item.score, reverse=True)[
+        : settings.scan_candidate_limit
+    ]
 
     print("scan_candidates")
-    print(f"symbols={len(parse_symbol_list(settings.us_scan_symbols))}")
+    print(f"us_symbols={len(parse_symbol_list(settings.us_scan_symbols))}")
+    print(f"kr_symbols={len(parse_symbol_list(settings.kr_scan_symbols))}")
     print(f"candidates={len(candidates)}")
     for candidate in candidates:
         signal = candidate.signal

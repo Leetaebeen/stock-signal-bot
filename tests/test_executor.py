@@ -10,6 +10,20 @@ class FakeBroker:
     def __init__(self) -> None:
         self.orders = []
 
+    def place_domestic_order(self, **kwargs):
+        self.orders.append(kwargs)
+        return OrderResult(
+            market="KR",
+            side=kwargs["side"],
+            symbol=kwargs["symbol"],
+            quantity=kwargs["quantity"],
+            price=kwargs["price"],
+            session="regular",
+            order_no=f"order-{len(self.orders)}",
+            message="accepted",
+            raw={"rt_cd": "0"},
+        )
+
     def place_overseas_order(self, **kwargs):
         self.orders.append(kwargs)
         return OrderResult(
@@ -37,18 +51,7 @@ class FakeAlerter:
 def test_executor_buys_and_stores_position(tmp_path):
     broker = FakeBroker()
     alerter = FakeAlerter()
-    executor = TradingExecutor(
-        broker=broker,
-        store=JsonPositionStore(tmp_path / "positions.json"),
-        rules=StrategyRules(),
-        config=ExecutionConfig(
-            quantity=1,
-            order_enabled=True,
-            paper_trading_only=True,
-            real_trading_enabled=False,
-        ),
-        alerter=alerter,
-    )
+    executor = _executor(tmp_path, broker=broker, alerter=alerter)
 
     result = executor.handle_signal(
         MarketSignal("HOOD", "Robinhood", "US", 113.0, 6.0, 7.0, 5_000_000_000, datetime.now(KST))
@@ -60,22 +63,24 @@ def test_executor_buys_and_stores_position(tmp_path):
     assert "[모의 매수 체결]" in alerter.messages[0]
 
 
+def test_executor_buys_kr_signal_with_domestic_order(tmp_path):
+    broker = FakeBroker()
+    executor = _executor(tmp_path, broker=broker)
+
+    result = executor.handle_signal(
+        MarketSignal("005930", "삼성전자", "KR", 78000.0, 6.0, 7.0, 5_000_000_000, datetime.now(KST))
+    )
+
+    assert result.action == "BUY"
+    assert broker.orders[0]["symbol"] == "005930"
+    assert broker.orders[0]["price"] == 78000
+
+
 def test_executor_sells_existing_position_on_take_profit(tmp_path):
     broker = FakeBroker()
     alerter = FakeAlerter()
     store = JsonPositionStore(tmp_path / "positions.json")
-    executor = TradingExecutor(
-        broker=broker,
-        store=store,
-        rules=StrategyRules(take_profit_pct=5.0),
-        config=ExecutionConfig(
-            quantity=1,
-            order_enabled=True,
-            paper_trading_only=True,
-            real_trading_enabled=False,
-        ),
-        alerter=alerter,
-    )
+    executor = _executor(tmp_path, broker=broker, alerter=alerter, store=store, rules=StrategyRules(take_profit_pct=5.0))
     entry_at = datetime(2026, 7, 6, 22, 30, 0, tzinfo=KST)
     executor.handle_signal(MarketSignal("HOOD", "Robinhood", "US", 100.0, 6.0, 7.0, 5_000_000_000, entry_at))
 
@@ -91,22 +96,14 @@ def test_executor_sells_existing_position_on_take_profit(tmp_path):
 
 def test_executor_notifies_order_failure(tmp_path):
     class FailingBroker:
+        def place_domestic_order(self, **kwargs):
+            raise RuntimeError("장 시작 전")
+
         def place_overseas_order(self, **kwargs):
             raise RuntimeError("장 시작 전")
 
     alerter = FakeAlerter()
-    executor = TradingExecutor(
-        broker=FailingBroker(),
-        store=JsonPositionStore(tmp_path / "positions.json"),
-        rules=StrategyRules(),
-        config=ExecutionConfig(
-            quantity=1,
-            order_enabled=True,
-            paper_trading_only=True,
-            real_trading_enabled=False,
-        ),
-        alerter=alerter,
-    )
+    executor = _executor(tmp_path, broker=FailingBroker(), alerter=alerter)
 
     result = executor.handle_signal(
         MarketSignal("HOOD", "Robinhood", "US", 113.0, 6.0, 7.0, 5_000_000_000, datetime.now(KST))
@@ -115,3 +112,18 @@ def test_executor_notifies_order_failure(tmp_path):
     assert result.action == "ERROR"
     assert "[모의 주문 실패]" in alerter.messages[0]
     assert "장 시작 전" in alerter.messages[0]
+
+
+def _executor(tmp_path, *, broker, alerter=None, store=None, rules=None):
+    return TradingExecutor(
+        broker=broker,
+        store=store or JsonPositionStore(tmp_path / "positions.json"),
+        rules=rules or StrategyRules(),
+        config=ExecutionConfig(
+            quantity=1,
+            order_enabled=True,
+            paper_trading_only=True,
+            real_trading_enabled=False,
+        ),
+        alerter=alerter,
+    )

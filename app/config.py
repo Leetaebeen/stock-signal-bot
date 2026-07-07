@@ -46,6 +46,8 @@ class Settings(BaseSettings):
     scan_candidate_limit: int = 5
     us_scan_symbols: str = "HOOD,NVDA,PLTR,TSLA,AMD,SOXL"
     us_scan_symbols_path: str | None = None
+    kr_scan_symbols: str = "005930,000660,035420,035720,005380,068270"
+    kr_scan_symbols_path: str | None = None
     quote_request_delay_seconds: float = 1.1
     us_order_exchange: str = "NAS"
     us_order_session: str = "regular"
