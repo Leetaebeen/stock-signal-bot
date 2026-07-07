@@ -55,11 +55,13 @@ class TradingRuntime:
             allow_us_regular=settings.allow_us_regular_trading,
             allow_us_extended=settings.allow_us_extended_trading,
         )
+        self._us_cursor = 0
+        self._kr_cursor = 0
 
     def run_once(self) -> list[ExecutionResult]:
         candidates = []
-        us_symbols = self._us_symbols()
-        kr_symbols = self._kr_symbols()
+        us_symbols = self._next_us_symbols()
+        kr_symbols = self._next_kr_symbols()
         if us_symbols:
             candidates.extend(self.scanner.scan_us(us_symbols, limit=self.settings.scan_candidate_limit))
         if kr_symbols:
@@ -93,13 +95,44 @@ class TradingRuntime:
         symbols.extend(load_symbols_from_file(self.settings.kr_scan_symbols_path))
         return _dedupe(symbols)
 
+    def _next_us_symbols(self) -> list[str]:
+        symbols, self._us_cursor = _next_batch(
+            self._us_symbols(),
+            self._us_cursor,
+            self.settings.us_scan_batch_size,
+        )
+        return symbols
+
+    def _next_kr_symbols(self) -> list[str]:
+        symbols, self._kr_cursor = _next_batch(
+            self._kr_symbols(),
+            self._kr_cursor,
+            self.settings.kr_scan_batch_size,
+        )
+        return symbols
+
 
 def _dedupe(symbols: list[str]) -> list[str]:
-        deduped: list[str] = []
-        for symbol in symbols:
-            if symbol not in deduped:
-                deduped.append(symbol)
-        return deduped
+    deduped: list[str] = []
+    for symbol in symbols:
+        if symbol not in deduped:
+            deduped.append(symbol)
+    return deduped
+
+
+def _next_batch(symbols: list[str], cursor: int, batch_size: int) -> tuple[list[str], int]:
+    if not symbols:
+        return [], 0
+    if batch_size <= 0 or batch_size >= len(symbols):
+        return symbols, 0
+
+    start = cursor % len(symbols)
+    end = start + batch_size
+    if end <= len(symbols):
+        batch = symbols[start:end]
+    else:
+        batch = symbols[start:] + symbols[: end - len(symbols)]
+    return batch, end % len(symbols)
 
 
 def _rules_from_settings(settings: Settings) -> StrategyRules:

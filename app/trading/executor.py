@@ -112,6 +112,7 @@ class TradingExecutor:
                 side="BUY",
                 quantity=self.config.quantity,
                 price=signal.price,
+                currency=_currency_for_market(signal.market),
                 reason=decision.reason,
                 filled_at=signal.observed_at,
             )
@@ -154,6 +155,7 @@ class TradingExecutor:
                 quantity=updated.quantity,
                 price=signal.price,
                 entry_price=updated.entry_price,
+                currency=_currency_for_market(signal.market),
                 reason=decision.reason,
                 holding_seconds=holding_seconds,
                 filled_at=signal.observed_at,
@@ -204,3 +206,7 @@ class TradingExecutor:
                     )
                 )
             )
+
+
+def _currency_for_market(market: str) -> str:
+    return "KRW" if market.upper() == "KR" else "USD"

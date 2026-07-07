@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     auto_trading_enabled: bool = False
     scan_interval_seconds: int = 60
     scan_candidate_limit: int = 5
+    us_scan_batch_size: int = 20
+    kr_scan_batch_size: int = 10
     us_scan_symbols: str = "HOOD,NVDA,PLTR,TSLA,AMD,SOXL"
     us_scan_symbols_path: str | None = None
     kr_scan_symbols: str = "005930,000660,035420,035720,005380,068270"

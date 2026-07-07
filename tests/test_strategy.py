@@ -101,7 +101,7 @@ def test_exit_sells_on_trailing_drawdown():
     decision = evaluate_exit(position, current_price=102.0, now=entry_at + timedelta(minutes=4), rules=StrategyRules())
 
     assert decision.action == "SELL"
-    assert "상승 후 되밀림" in decision.reason
+    assert "상승 후 트레일링" in decision.reason
 
 
 def test_position_store_round_trips(tmp_path):

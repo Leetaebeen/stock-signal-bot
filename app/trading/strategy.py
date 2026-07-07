@@ -111,7 +111,7 @@ def evaluate_exit(
     if high_pnl_pct >= rules.trailing_start_pct and drawdown_pct >= rules.trailing_drawdown_pct:
         return TradeDecision(
             "SELL",
-            f"상승 후 되밀림: 고점 대비 -{drawdown_pct:.2f}%, 현재 수익률 {pnl_pct:+.2f}%",
+            f"상승 후 트레일링: 고점 대비 -{drawdown_pct:.2f}%, 현재 수익률 {pnl_pct:+.2f}%",
         )
 
     holding_seconds = int((current_time - position.entry_at).total_seconds())

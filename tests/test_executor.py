@@ -65,7 +65,8 @@ def test_executor_buys_and_stores_position(tmp_path):
 
 def test_executor_buys_kr_signal_with_domestic_order(tmp_path):
     broker = FakeBroker()
-    executor = _executor(tmp_path, broker=broker)
+    alerter = FakeAlerter()
+    executor = _executor(tmp_path, broker=broker, alerter=alerter)
 
     result = executor.handle_signal(
         MarketSignal("005930", "삼성전자", "KR", 78000.0, 6.0, 7.0, 5_000_000_000, datetime.now(KST))
@@ -74,6 +75,7 @@ def test_executor_buys_kr_signal_with_domestic_order(tmp_path):
     assert result.action == "BUY"
     assert broker.orders[0]["symbol"] == "005930"
     assert broker.orders[0]["price"] == 78000
+    assert "매수가: 78,000원" in alerter.messages[0]
 
 
 def test_executor_sells_existing_position_on_take_profit(tmp_path):

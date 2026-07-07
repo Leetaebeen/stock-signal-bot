@@ -15,7 +15,7 @@ def test_build_buy_fill_message():
             side="BUY",
             quantity=1,
             price=195.2,
-            reason="거래량 증가 + 전략 조건 통과",
+            reason="급등 초입 조건 통과",
             filled_at=datetime(2026, 7, 5, 21, 35, 12, tzinfo=KST),
         )
     )
@@ -48,6 +48,25 @@ def test_build_sell_fill_message():
     assert "수익률: +3.02%" in message
     assert "손익: +$5.90" in message
     assert "보유 시간: 8분 12초" in message
+
+
+def test_build_krw_fill_message():
+    message = build_trade_fill_message(
+        TradeFill(
+            symbol="005930",
+            name="삼성전자",
+            market="KR",
+            side="BUY",
+            quantity=1,
+            price=78000,
+            currency="KRW",
+            reason="급등 초입 조건 통과",
+            filled_at=datetime(2026, 7, 5, 10, 1, 2, tzinfo=KST),
+        )
+    )
+
+    assert "시장: 국장" in message
+    assert "매수가: 78,000원" in message
 
 
 def test_build_order_failure_message():
