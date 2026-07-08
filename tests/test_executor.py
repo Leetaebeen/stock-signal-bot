@@ -78,6 +78,24 @@ def test_executor_buys_kr_signal_with_domestic_order(tmp_path):
     assert "매수가: 78,000원" in alerter.messages[0]
 
 
+def test_executor_blocks_new_entry_when_max_open_positions_reached(tmp_path):
+    broker = FakeBroker()
+    executor = _executor(tmp_path, broker=broker)
+    observed_at = datetime.now(KST)
+
+    first = executor.handle_signal(
+        MarketSignal("HOOD", "Robinhood", "US", 113.0, 6.0, 7.0, 5_000_000_000, observed_at)
+    )
+    second = executor.handle_signal(
+        MarketSignal("PLTR", "Palantir", "US", 120.0, 6.0, 7.0, 5_000_000_000, observed_at)
+    )
+
+    assert first.action == "BUY"
+    assert second.action == "HOLD"
+    assert "최대 보유 종목 수 도달" in second.reason
+    assert len(broker.orders) == 1
+
+
 def test_executor_sells_existing_position_on_take_profit(tmp_path):
     broker = FakeBroker()
     alerter = FakeAlerter()

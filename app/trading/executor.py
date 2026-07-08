@@ -47,6 +47,7 @@ class ExecutionConfig:
     order_enabled: bool
     paper_trading_only: bool
     real_trading_enabled: bool
+    max_open_positions: int = 1
     exchange: str = "NAS"
     session: str = "regular"
     order_type: str = "limit"
@@ -89,6 +90,12 @@ class TradingExecutor:
         decision = evaluate_entry(signal, self.rules)
         if not decision.should_buy:
             return ExecutionResult("HOLD", signal.symbol, decision.reason)
+        if self.config.max_open_positions > 0 and len(positions) >= self.config.max_open_positions:
+            return ExecutionResult(
+                "HOLD",
+                signal.symbol,
+                f"최대 보유 종목 수 도달: {len(positions)}/{self.config.max_open_positions}",
+            )
 
         try:
             order = self._place_order(

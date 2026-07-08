@@ -36,6 +36,7 @@ class TradingRuntime:
             rules=_rules_from_settings(settings),
             config=ExecutionConfig(
                 quantity=settings.trading_default_quantity,
+                max_open_positions=settings.trading_max_open_positions,
                 order_enabled=settings.order_enabled,
                 paper_trading_only=settings.paper_trading_only,
                 real_trading_enabled=settings.real_trading_enabled,

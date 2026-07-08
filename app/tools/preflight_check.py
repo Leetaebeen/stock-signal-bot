@@ -51,6 +51,7 @@ def _check_config(settings: Settings) -> list[CheckResult]:
         CheckResult("paper_trading_only", "OK" if settings.paper_trading_only else "FAIL", str(settings.paper_trading_only)),
         CheckResult("order_enabled", "WARN" if settings.order_enabled else "OK", str(settings.order_enabled)),
         CheckResult("auto_trading_enabled", "WARN" if settings.auto_trading_enabled else "OK", str(settings.auto_trading_enabled)),
+        CheckResult("trading_max_open_positions", "OK" if settings.trading_max_open_positions > 0 else "WARN", str(settings.trading_max_open_positions)),
         CheckResult(
             "telegram",
             "OK" if settings.telegram_enabled and settings.telegram_bot_token and settings.telegram_chat_id else "WARN",
