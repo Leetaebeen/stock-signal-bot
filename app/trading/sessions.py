@@ -26,6 +26,16 @@ class SessionPolicy:
         return False
 
 
+def active_markets(policy: SessionPolicy, now: datetime | None = None, us_session: str = "regular") -> list[str]:
+    current = now or datetime.now(KST)
+    markets = []
+    if policy.is_market_open("KR", now=current, session="regular"):
+        markets.append("KR")
+    if policy.is_market_open("US", now=current, session=us_session):
+        markets.append("US")
+    return markets
+
+
 def is_kr_regular_open(now: datetime | None = None) -> bool:
     current = _as_kst(now or datetime.now(KST))
     if current.weekday() >= 5:

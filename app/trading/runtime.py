@@ -5,7 +5,7 @@ from app.brokers.kis_client import KisClient
 from app.config import Settings
 from app.scanners.momentum import MomentumScanner, TradingValueBaseline, load_symbols_from_file, parse_symbol_list
 from app.trading.executor import ExecutionConfig, ExecutionResult, TradingExecutor
-from app.trading.sessions import SessionPolicy, market_closed_reason
+from app.trading.sessions import SessionPolicy, active_markets, market_closed_reason
 from app.trading.state import JsonPositionStore
 from app.trading.strategy import StrategyRules
 
@@ -61,8 +61,10 @@ class TradingRuntime:
 
     def run_once(self) -> list[ExecutionResult]:
         candidates = []
-        us_symbols = self._next_us_symbols() if self._can_trade("US") else []
-        kr_symbols = self._next_kr_symbols() if self._can_trade("KR") else []
+        active = active_markets(self.session_policy, us_session=self.settings.us_order_session)
+        logger.info("scan cycle active_markets=%s", ",".join(active) if active else "NONE")
+        us_symbols = self._next_us_symbols() if "US" in active else []
+        kr_symbols = self._next_kr_symbols() if "KR" in active else []
         if us_symbols:
             candidates.extend(self.scanner.scan_us(us_symbols, limit=self.settings.scan_candidate_limit))
         if kr_symbols:

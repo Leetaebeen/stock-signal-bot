@@ -5,7 +5,7 @@ from pathlib import Path
 from app.brokers.kis_client import KisClient, summarize_domestic_balance
 from app.config import Settings, get_settings
 from app.scanners.momentum import MomentumScanner, TradingValueBaseline, load_symbols_from_file, parse_symbol_list
-from app.trading.sessions import KST, SessionPolicy, market_closed_reason
+from app.trading.sessions import KST, SessionPolicy, active_markets, market_closed_reason
 
 
 @dataclass(frozen=True)
@@ -103,11 +103,13 @@ def _check_sessions(settings: Settings) -> CheckResult:
     )
     kr_open = policy.is_market_open("KR", now=now, session="regular")
     us_open = policy.is_market_open("US", now=now, session=settings.us_order_session)
+    active = active_markets(policy, now=now, us_session=settings.us_order_session)
     return CheckResult(
         "sessions",
         "OK" if kr_open or us_open else "WARN",
-        "now={now} kr={kr} us={us} kr_reason={kr_reason} us_reason={us_reason}".format(
+        "now={now} active_market={active} kr={kr} us={us} kr_reason={kr_reason} us_reason={us_reason}".format(
             now=now.strftime("%Y-%m-%d %H:%M:%S KST"),
+            active=",".join(active) if active else "NONE",
             kr=kr_open,
             us=us_open,
             kr_reason=market_closed_reason("KR"),

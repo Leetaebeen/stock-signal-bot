@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from app.trading.sessions import KST, SessionPolicy, is_kr_regular_open, is_us_extended_open, is_us_regular_open
+from app.trading.sessions import KST, SessionPolicy, active_markets, is_kr_regular_open, is_us_extended_open, is_us_regular_open
 
 
 def test_kr_regular_session_uses_kst_window():
@@ -39,3 +39,11 @@ def test_session_policy_uses_kst_windows():
     assert not policy.is_market_open("US", datetime(2026, 7, 13, 9, 0, tzinfo=KST), "regular")
     assert policy.is_market_open("US", datetime(2026, 7, 13, 23, 0, tzinfo=KST), "regular")
     assert not policy.is_market_open("KR", datetime(2026, 7, 13, 23, 0, tzinfo=KST), "regular")
+
+
+def test_active_markets_returns_only_current_kst_market():
+    policy = SessionPolicy()
+
+    assert active_markets(policy, datetime(2026, 7, 13, 9, 0, tzinfo=KST)) == ["KR"]
+    assert active_markets(policy, datetime(2026, 7, 13, 23, 0, tzinfo=KST)) == ["US"]
+    assert active_markets(policy, datetime(2026, 7, 13, 18, 0, tzinfo=KST)) == []
