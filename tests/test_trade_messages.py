@@ -15,7 +15,7 @@ def test_build_buy_fill_message():
             side="BUY",
             quantity=1,
             price=195.2,
-            reason="급등 초입 조건 통과",
+            reason="전략 점수 78점 통과",
             filled_at=datetime(2026, 7, 5, 21, 35, 12, tzinfo=KST),
         )
     )
@@ -24,6 +24,7 @@ def test_build_buy_fill_message():
     assert "종목: 엔비디아 (NVDA)" in message
     assert "매수가: $195.20" in message
     assert "주문금액: $195.20" in message
+    assert "진입 사유: 전략 점수 78점 통과" in message
 
 
 def test_build_sell_fill_message():
@@ -60,7 +61,7 @@ def test_build_krw_fill_message():
             quantity=1,
             price=78000,
             currency="KRW",
-            reason="급등 초입 조건 통과",
+            reason="전략 점수 72점 통과",
             filled_at=datetime(2026, 7, 5, 10, 1, 2, tzinfo=KST),
         )
     )

@@ -4,7 +4,7 @@ from app.trading.state import JsonPositionStore
 from app.trading.strategy import KST, MarketSignal, StrategyRules, evaluate_entry, evaluate_exit, open_position
 
 
-def test_entry_buys_when_momentum_volume_and_value_pass():
+def test_entry_buys_when_momentum_volume_value_and_score_pass():
     signal = MarketSignal(
         symbol="NVDA",
         name="NVIDIA",
@@ -12,14 +12,14 @@ def test_entry_buys_when_momentum_volume_and_value_pass():
         price=200.0,
         change_pct=6.5,
         volume_ratio=8.0,
-        trading_value_krw=5_000_000_000,
+        trading_value_krw=8_000_000_000,
     )
 
     decision = evaluate_entry(signal, StrategyRules())
 
     assert decision.action == "BUY"
-    assert decision.score > 0
-    assert "급등 초입 조건 통과" in decision.reason
+    assert decision.score >= StrategyRules().entry_min_score
+    assert "전략 점수" in decision.reason
 
 
 def test_entry_holds_when_volume_is_too_low():
@@ -54,6 +54,23 @@ def test_entry_holds_when_move_is_overheated():
 
     assert decision.action == "HOLD"
     assert "과열 기준 초과" in decision.reason
+
+
+def test_entry_holds_when_strategy_score_is_too_low():
+    signal = MarketSignal(
+        symbol="SLOW",
+        name="Slow Stock",
+        market="US",
+        price=20.0,
+        change_pct=3.2,
+        volume_ratio=4.2,
+        trading_value_krw=1_100_000_000,
+    )
+
+    decision = evaluate_entry(signal, StrategyRules(entry_min_score=80))
+
+    assert decision.action == "HOLD"
+    assert "전략 점수" in decision.reason
 
 
 def test_exit_sells_at_take_profit():

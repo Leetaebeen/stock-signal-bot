@@ -24,20 +24,24 @@ def test_trading_value_baseline_calculates_ratio_after_first_observation():
     assert baseline.volume_ratio("NVDA", 450) == 4.5
 
 
-def test_momentum_scanner_returns_sorted_candidates():
+def test_momentum_scanner_returns_sorted_candidates_by_strategy_score():
+    baseline = TradingValueBaseline()
+    baseline.volume_ratio("AAA", 1_000_000_000)
+    baseline.volume_ratio("BBB", 1_000_000_000)
     scanner = MomentumScanner(
         quote_client=FakeQuoteClient(
             {
                 "AAA": PriceSnapshot("AAA", "AAA", "US", 10, 2.0, 1_000_000_000, "NAS"),
                 "BBB": PriceSnapshot("BBB", "BBB", "US", 20, 6.0, 5_000_000_000, "NAS"),
             }
-        )
+        ),
+        baseline=baseline,
     )
 
     candidates = scanner.scan_us(["AAA", "BBB"], limit=2)
 
     assert [candidate.signal.symbol for candidate in candidates] == ["BBB", "AAA"]
-    assert candidates[0].signal.volume_ratio == 1.0
+    assert candidates[0].signal.volume_ratio == 5.0
 
 
 def test_momentum_scanner_scans_kr_symbols():

@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     entry_min_volume_ratio: float = 4.0
     entry_max_volume_ratio: float = 20.0
     entry_min_trading_value_krw: float = 1_000_000_000
+    entry_min_score: int = 65
     take_profit_pct: float = 5.0
     stop_loss_pct: float = -2.0
     trailing_start_pct: float = 3.0
@@ -47,9 +48,18 @@ class Settings(BaseSettings):
     scan_candidate_limit: int = 5
     us_scan_batch_size: int = 20
     kr_scan_batch_size: int = 10
-    us_scan_symbols: str = "HOOD,NVDA,PLTR,TSLA,AMD,SOXL"
+    us_scan_symbols: str = (
+        "NVDA,TSLA,AMD,PLTR,HOOD,SOFI,COIN,MARA,RIOT,IONQ,RKLB,SMCI,MSTR,AVGO,META,MSFT,AAPL,"
+        "GOOGL,AMZN,NFLX,ARM,CRWD,DDOG,NET,SHOP,MRVL,MU,INTC,QCOM,ADBE,APP,UPST,AFRM,ROKU,LCID,"
+        "RIVN,WBD,OPEN,TQQQ,SQQQ,UBER,ABNB,DKNG,GM,CHWY,SNOW,PATH,U,AI,CVNA,SE,ELF,CELH,DELL"
+    )
     us_scan_symbols_path: str | None = None
-    kr_scan_symbols: str = "005930,000660,035420,035720,005380,068270"
+    kr_scan_symbols: str = (
+        "005930,000660,035420,035720,005380,068270,247540,086520,028300,196170,277810,042700,"
+        "010140,009540,329180,402340,373220,006400,051910,096770,005490,034020,011200,010130,"
+        "064350,012450,272210,066570,207940,003670,090430,352820,259960,000270,105560,055550,"
+        "316140,138040,323410,122870,298040,042660,267260,005070,005420,128940,161890,112040"
+    )
     kr_scan_symbols_path: str | None = None
     quote_request_delay_seconds: float = 1.1
     us_order_exchange: str = "NAS"

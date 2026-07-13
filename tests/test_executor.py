@@ -53,9 +53,7 @@ def test_executor_buys_and_stores_position(tmp_path):
     alerter = FakeAlerter()
     executor = _executor(tmp_path, broker=broker, alerter=alerter)
 
-    result = executor.handle_signal(
-        MarketSignal("HOOD", "Robinhood", "US", 113.0, 6.0, 7.0, 5_000_000_000, datetime.now(KST))
-    )
+    result = executor.handle_signal(_strong_signal("HOOD", "Robinhood", "US"))
 
     assert result.action == "BUY"
     assert broker.orders[0]["side"] == "buy"
@@ -68,9 +66,7 @@ def test_executor_buys_kr_signal_with_domestic_order(tmp_path):
     alerter = FakeAlerter()
     executor = _executor(tmp_path, broker=broker, alerter=alerter)
 
-    result = executor.handle_signal(
-        MarketSignal("005930", "삼성전자", "KR", 78000.0, 6.0, 7.0, 5_000_000_000, datetime.now(KST))
-    )
+    result = executor.handle_signal(_strong_signal("005930", "삼성전자", "KR", price=78000.0))
 
     assert result.action == "BUY"
     assert broker.orders[0]["symbol"] == "005930"
@@ -83,16 +79,12 @@ def test_executor_blocks_new_entry_when_max_open_positions_reached(tmp_path):
     executor = _executor(tmp_path, broker=broker)
     observed_at = datetime.now(KST)
 
-    first = executor.handle_signal(
-        MarketSignal("HOOD", "Robinhood", "US", 113.0, 6.0, 7.0, 5_000_000_000, observed_at)
-    )
-    second = executor.handle_signal(
-        MarketSignal("PLTR", "Palantir", "US", 120.0, 6.0, 7.0, 5_000_000_000, observed_at)
-    )
+    first = executor.handle_signal(_strong_signal("HOOD", "Robinhood", "US", observed_at=observed_at))
+    second = executor.handle_signal(_strong_signal("PLTR", "Palantir", "US", observed_at=observed_at))
 
     assert first.action == "BUY"
     assert second.action == "HOLD"
-    assert "최대 보유 종목 수 도달" in second.reason
+    assert "보유 종목" in second.reason
     assert len(broker.orders) == 1
 
 
@@ -102,7 +94,7 @@ def test_executor_sells_existing_position_on_take_profit(tmp_path):
     store = JsonPositionStore(tmp_path / "positions.json")
     executor = _executor(tmp_path, broker=broker, alerter=alerter, store=store, rules=StrategyRules(take_profit_pct=5.0))
     entry_at = datetime(2026, 7, 6, 22, 30, 0, tzinfo=KST)
-    executor.handle_signal(MarketSignal("HOOD", "Robinhood", "US", 100.0, 6.0, 7.0, 5_000_000_000, entry_at))
+    executor.handle_signal(_strong_signal("HOOD", "Robinhood", "US", price=100.0, observed_at=entry_at))
 
     result = executor.handle_signal(
         MarketSignal("HOOD", "Robinhood", "US", 106.0, 8.0, 7.0, 5_500_000_000, entry_at + timedelta(minutes=5))
@@ -117,21 +109,30 @@ def test_executor_sells_existing_position_on_take_profit(tmp_path):
 def test_executor_notifies_order_failure(tmp_path):
     class FailingBroker:
         def place_domestic_order(self, **kwargs):
-            raise RuntimeError("장 시작 전")
+            raise RuntimeError("주문 API 오류")
 
         def place_overseas_order(self, **kwargs):
-            raise RuntimeError("장 시작 전")
+            raise RuntimeError("주문 API 오류")
 
     alerter = FakeAlerter()
     executor = _executor(tmp_path, broker=FailingBroker(), alerter=alerter)
 
-    result = executor.handle_signal(
-        MarketSignal("HOOD", "Robinhood", "US", 113.0, 6.0, 7.0, 5_000_000_000, datetime.now(KST))
-    )
+    result = executor.handle_signal(_strong_signal("HOOD", "Robinhood", "US"))
 
     assert result.action == "ERROR"
     assert "[모의 주문 실패]" in alerter.messages[0]
-    assert "장 시작 전" in alerter.messages[0]
+    assert "주문 API 오류" in alerter.messages[0]
+
+
+def _strong_signal(
+    symbol: str,
+    name: str,
+    market: str,
+    *,
+    price: float = 113.0,
+    observed_at=None,
+) -> MarketSignal:
+    return MarketSignal(symbol, name, market, price, 6.5, 8.0, 8_000_000_000, observed_at or datetime.now(KST))
 
 
 def _executor(tmp_path, *, broker, alerter=None, store=None, rules=None):

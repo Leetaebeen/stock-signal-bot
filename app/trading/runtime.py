@@ -145,6 +145,7 @@ def _rules_from_settings(settings: Settings) -> StrategyRules:
         entry_min_volume_ratio=settings.entry_min_volume_ratio,
         entry_max_volume_ratio=settings.entry_max_volume_ratio,
         entry_min_trading_value_krw=settings.entry_min_trading_value_krw,
+        entry_min_score=settings.entry_min_score,
         take_profit_pct=settings.take_profit_pct,
         stop_loss_pct=settings.stop_loss_pct,
         trailing_start_pct=settings.trailing_start_pct,

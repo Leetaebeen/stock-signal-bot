@@ -6,7 +6,7 @@ import time
 from typing import Iterable, Protocol
 
 from app.brokers.kis_client import PriceSnapshot
-from app.trading.strategy import KST, MarketSignal
+from app.trading.strategy import KST, MarketSignal, StrategyRules, entry_score
 
 
 logger = logging.getLogger(__name__)
@@ -121,4 +121,4 @@ def _clean_symbols(symbols: Iterable[str]) -> list[str]:
 
 
 def _score_signal(signal: MarketSignal) -> float:
-    return (signal.change_pct * 10) + (signal.volume_ratio * 5) + min(signal.trading_value_krw / 1_000_000_000, 20)
+    return float(entry_score(signal, StrategyRules()))

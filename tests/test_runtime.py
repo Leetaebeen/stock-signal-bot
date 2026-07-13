@@ -14,6 +14,7 @@ class FakeSettings:
     entry_min_volume_ratio = 4.0
     entry_max_volume_ratio = 20.0
     entry_min_trading_value_krw = 1_000_000_000
+    entry_min_score = 65
     take_profit_pct = 5.0
     stop_loss_pct = -2.0
     trailing_start_pct = 3.0
