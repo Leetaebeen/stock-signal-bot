@@ -112,8 +112,8 @@ def _check_sessions(settings: Settings) -> CheckResult:
             active=",".join(active) if active else "NONE",
             kr=kr_open,
             us=us_open,
-            kr_reason=market_closed_reason("KR"),
-            us_reason=market_closed_reason("US", session=settings.us_order_session),
+            kr_reason="국장 거래 시간" if kr_open else market_closed_reason("KR", now=now),
+            us_reason="미장 거래 시간" if us_open else market_closed_reason("US", now=now, session=settings.us_order_session),
         ),
     )
 
