@@ -2,6 +2,7 @@ import json
 
 import httpx
 
+from app.brokers import kis_client as kis_client_module
 from app.brokers.kis_client import KisClient, summarize_domestic_balance
 
 
@@ -280,6 +281,51 @@ def test_place_overseas_paper_sell_order_maps_exchange_and_tr_id(tmp_path):
     assert result.side == "sell"
     assert result.session == "regular"
     assert result.order_no == "000002"
+
+
+def test_place_overseas_order_retries_once_when_kis_rate_limited(tmp_path, monkeypatch):
+    order_requests = 0
+    monkeypatch.setattr(kis_client_module.time, "sleep", lambda seconds: None)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal order_requests
+        if request.url.path == "/oauth2/tokenP":
+            return httpx.Response(200, json={"access_token": "token", "token_type": "Bearer", "expires_in": 3600})
+        if request.url.path == "/uapi/hashkey":
+            return httpx.Response(200, json={"HASH": "sample-hash"})
+        if request.url.path == "/uapi/overseas-stock/v1/trading/order":
+            order_requests += 1
+            if order_requests == 1:
+                return httpx.Response(
+                    500,
+                    json={"rt_cd": "1", "msg_cd": "EGW00201", "msg1": "초당 거래건수를 초과하였습니다."},
+                )
+            return httpx.Response(200, json={"rt_cd": "0", "msg1": "accepted", "output": {"ODNO": "000004"}})
+        return httpx.Response(404)
+
+    client = KisClient(
+        app_key="app-key",
+        app_secret="app-secret",
+        account_no="12345678",
+        account_product_code="01",
+        env="paper",
+        token_cache_path=str(tmp_path / "kis_token.json"),
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    result = client.place_overseas_order(
+        side="sell",
+        symbol="SHOP",
+        quantity=1,
+        price=129.74,
+        exchange="NAS",
+        order_enabled=True,
+        paper_trading_only=True,
+        real_trading_enabled=False,
+    )
+
+    assert order_requests == 2
+    assert result.order_no == "000004"
 
 
 def test_place_overseas_day_session_uses_daytime_order_path(tmp_path):

@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import time
 from typing import Any
 
 import httpx
@@ -7,6 +8,9 @@ from app.brokers.kis_auth import KisAuthClient
 
 
 KIS_EXPIRED_TOKEN_CODE = "EGW00123"
+KIS_RATE_LIMIT_CODE = "EGW00201"
+KIS_RATE_LIMIT_MAX_RETRIES = 2
+KIS_RATE_LIMIT_RETRY_DELAY_SECONDS = 1.2
 USD_KRW_FALLBACK = 1350.0
 
 
@@ -230,6 +234,11 @@ class KisClient:
         response = self._get_with_auth(path, tr_id=tr_id, params=params, force_refresh=False)
         if _is_expired_token_response(response):
             response = self._get_with_auth(path, tr_id=tr_id, params=params, force_refresh=True)
+        for _ in range(KIS_RATE_LIMIT_MAX_RETRIES):
+            if not _is_rate_limit_response(response):
+                break
+            time.sleep(KIS_RATE_LIMIT_RETRY_DELAY_SECONDS)
+            response = self._get_with_auth(path, tr_id=tr_id, params=params, force_refresh=False)
         return response
 
     def _get_with_auth(
@@ -257,6 +266,11 @@ class KisClient:
         response = self._post_with_auth(path, tr_id=tr_id, payload=payload, force_refresh=False)
         if _is_expired_token_response(response):
             response = self._post_with_auth(path, tr_id=tr_id, payload=payload, force_refresh=True)
+        for _ in range(KIS_RATE_LIMIT_MAX_RETRIES):
+            if not _is_rate_limit_response(response):
+                break
+            time.sleep(KIS_RATE_LIMIT_RETRY_DELAY_SECONDS)
+            response = self._post_with_auth(path, tr_id=tr_id, payload=payload, force_refresh=False)
         return response
 
     def _post_with_auth(
@@ -558,6 +572,15 @@ def _to_float(value: Any) -> float:
         return float(text)
     except ValueError:
         return 0.0
+
+
+def _is_rate_limit_response(response: httpx.Response) -> bool:
+    try:
+        payload = response.json()
+    except ValueError:
+        return False
+    message = str(payload.get("msg1") or payload.get("message") or "")
+    return payload.get("msg_cd") == KIS_RATE_LIMIT_CODE or "초당 거래건수" in message
 
 
 def _is_expired_token_response(response: httpx.Response) -> bool:
