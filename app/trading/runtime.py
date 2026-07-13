@@ -61,14 +61,14 @@ class TradingRuntime:
 
     def run_once(self) -> list[ExecutionResult]:
         candidates = []
-        us_symbols = self._next_us_symbols()
-        kr_symbols = self._next_kr_symbols()
+        us_symbols = self._next_us_symbols() if self._can_trade("US") else []
+        kr_symbols = self._next_kr_symbols() if self._can_trade("KR") else []
         if us_symbols:
             candidates.extend(self.scanner.scan_us(us_symbols, limit=self.settings.scan_candidate_limit))
         if kr_symbols:
             candidates.extend(self.scanner.scan_kr(kr_symbols, limit=self.settings.scan_candidate_limit))
         if not candidates:
-            logger.info("scan skipped: no symbols configured")
+            logger.info("scan skipped: no open market or no symbols configured")
             return []
         results: list[ExecutionResult] = []
         for candidate in sorted(candidates, key=lambda item: item.score, reverse=True)[: self.settings.scan_candidate_limit]:
