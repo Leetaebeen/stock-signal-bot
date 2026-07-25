@@ -4,19 +4,29 @@ from app.trading.journal import TradeJournal
 
 def main() -> None:
     settings = get_settings()
-    summary = TradeJournal(settings.trade_journal_path).performance_summary()
+    journal = TradeJournal(settings.trade_journal_path)
+    summary = journal.performance_summary()
     if not summary:
         print("completed_trades=0")
-        return
-    for currency, item in summary.items():
-        trades = int(item["trades"])
-        wins = int(item["wins"])
-        win_rate = (wins / trades * 100) if trades else 0.0
-        print(
-            f"{currency} trades={trades} wins={wins} win_rate={win_rate:.2f}% "
-            f"realized_pnl={item['realized_pnl']:,.2f} "
-            f"average_pnl_pct={item['average_pnl_pct']:+.2f}%"
+    else:
+        for currency, item in summary.items():
+            trades = int(item["trades"])
+            wins = int(item["wins"])
+            win_rate = (wins / trades * 100) if trades else 0.0
+            print(
+                f"{currency} trades={trades} wins={wins} win_rate={win_rate:.2f}% "
+                f"realized_pnl={item['realized_pnl']:,.2f} "
+                f"average_pnl_pct={item['average_pnl_pct']:+.2f}%"
+            )
+
+    signals = journal.signal_summary()
+    print(
+        "signals={observations} labeled_5m={labeled_5m} labeled_15m={labeled_15m} "
+        "labeled_30m={labeled_30m} avg_5m={average_return_5m:+.2f}% "
+        "avg_15m={average_return_15m:+.2f}% avg_30m={average_return_30m:+.2f}%".format(
+            **signals
         )
+    )
 
 
 if __name__ == "__main__":

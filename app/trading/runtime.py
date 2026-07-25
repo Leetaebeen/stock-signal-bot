@@ -5,12 +5,18 @@ from datetime import datetime
 from app.alerts.telegram import TelegramAlerter
 from app.brokers.kis_client import KisClient
 from app.config import Settings
-from app.scanners.momentum import MomentumScanner, load_symbols_from_file, parse_exchange_map, parse_symbol_list
+from app.scanners.momentum import (
+    MomentumScanner,
+    ScanCandidate,
+    load_symbols_from_file,
+    parse_exchange_map,
+    parse_symbol_list,
+)
 from app.trading.executor import ExecutionConfig, ExecutionResult, TradingExecutor
-from app.trading.journal import TradeJournal
+from app.trading.journal import SignalRecord, TradeJournal
 from app.trading.sessions import SessionPolicy, active_markets, market_closed_reason
 from app.trading.state import JsonPositionStore
-from app.trading.strategy import KST, MarketSignal, StrategyRules
+from app.trading.strategy import KST, MarketSignal, StrategyRules, evaluate_entry
 
 
 logger = logging.getLogger(__name__)
@@ -35,6 +41,7 @@ class TradingRuntime:
             exchange=settings.us_order_exchange,
             request_delay_seconds=settings.quote_request_delay_seconds,
         )
+        self.journal = TradeJournal(settings.trade_journal_path)
         self.executor = TradingExecutor(
             broker=self.client,
             store=self.store,
@@ -58,7 +65,7 @@ class TradingRuntime:
                 bot_token=settings.telegram_bot_token,
                 chat_id=settings.telegram_chat_id,
             ),
-            journal=TradeJournal(settings.trade_journal_path),
+            journal=self.journal,
         )
         self.session_policy = SessionPolicy(
             allow_kr_regular=settings.allow_kr_regular_trading,
@@ -106,6 +113,7 @@ class TradingRuntime:
                     limit=self.settings.scan_candidate_limit,
                 )
             )
+        self._label_due_signals(active, candidates)
         if not candidates:
             logger.info("scan completed: no entry candidate")
             return results
@@ -113,12 +121,105 @@ class TradingRuntime:
             if not self._can_trade(candidate.signal.market):
                 reason = market_closed_reason(candidate.signal.market, session=self.settings.us_order_session)
                 logger.info("scan result symbol=%s action=SKIP reason=%s", candidate.signal.symbol, reason)
-                results.append(ExecutionResult("SKIP", candidate.signal.symbol, reason))
+                result = ExecutionResult("SKIP", candidate.signal.symbol, reason)
+                self._record_signal(candidate, result)
+                results.append(result)
                 continue
             result = self.executor.handle_signal(candidate.signal)
             logger.info("scan result symbol=%s action=%s reason=%s", result.symbol, result.action, result.reason)
+            self._record_signal(candidate, result)
             results.append(result)
         return results
+
+    def _record_signal(self, candidate: ScanCandidate, result: ExecutionResult) -> None:
+        if not getattr(self.settings, "signal_journal_enabled", True):
+            return
+        signal = candidate.signal
+        strategy = evaluate_entry(signal, self.rules)
+        try:
+            self.journal.record_signal(
+                SignalRecord(
+                    symbol=signal.symbol,
+                    name=signal.name,
+                    market=signal.market,
+                    exchange=signal.exchange,
+                    observed_at=signal.observed_at or datetime.now(KST),
+                    price=signal.price,
+                    change_pct=signal.change_pct,
+                    volume_ratio=signal.volume_ratio,
+                    trading_value_krw=signal.trading_value_krw,
+                    one_minute_change_pct=signal.one_minute_change_pct,
+                    five_minute_change_pct=signal.five_minute_change_pct,
+                    breakout_pct=signal.breakout_pct,
+                    vwap_extension_pct=signal.vwap_extension_pct,
+                    confirmation_bars=signal.confirmation_bars,
+                    score=candidate.score,
+                    source=candidate.source,
+                    strategy_action=strategy.action,
+                    strategy_reason=strategy.reason,
+                    execution_action=result.action,
+                    execution_reason=result.reason,
+                )
+            )
+        except Exception:
+            logger.exception("signal journal write failed symbol=%s", signal.symbol)
+
+    def _label_due_signals(
+        self,
+        active_markets_now: list[str],
+        candidates: list[ScanCandidate],
+    ) -> None:
+        if not getattr(self.settings, "signal_journal_enabled", True):
+            return
+        active = {market.upper() for market in active_markets_now}
+        if not active:
+            return
+        now = datetime.now(KST)
+        tasks = self.journal.due_signal_labels(
+            now,
+            tolerance_seconds=getattr(self.settings, "signal_label_tolerance_seconds", 180),
+            limit=50,
+        )
+        grouped = {}
+        for task in tasks:
+            if task.market.upper() not in active:
+                continue
+            grouped.setdefault((task.market.upper(), task.symbol, task.exchange), []).append(task)
+
+        candidate_prices = {
+            (item.signal.market.upper(), item.signal.symbol): item.signal.price
+            for item in candidates
+            if item.signal.price > 0
+        }
+        max_quotes = max(getattr(self.settings, "signal_label_max_quotes_per_cycle", 5), 0)
+        quote_count = 0
+        for (market, symbol, exchange), symbol_tasks in grouped.items():
+            price = candidate_prices.get((market, symbol))
+            if price is None:
+                if quote_count >= max_quotes:
+                    break
+                if quote_count:
+                    time.sleep(max(self.settings.quote_request_delay_seconds, 0))
+                try:
+                    if market == "KR":
+                        price = self.client.get_domestic_price(symbol).price
+                    else:
+                        price = self.client.get_overseas_price(
+                            symbol,
+                            exchange=exchange or self.settings.us_order_exchange,
+                        ).price
+                except Exception as exc:
+                    logger.warning("signal label quote skipped symbol=%s reason=%s", symbol, exc)
+                    continue
+                quote_count += 1
+            for task in symbol_tasks:
+                if self.journal.update_signal_label(task, current_price=price, labeled_at=now):
+                    logger.info(
+                        "signal labeled symbol=%s horizon=%sm price=%s",
+                        symbol,
+                        task.horizon_minutes,
+                        price,
+                    )
 
     def _sync_holdings_if_due(self) -> list[ExecutionResult]:
         now = time.monotonic()

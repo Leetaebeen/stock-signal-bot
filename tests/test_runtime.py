@@ -1,9 +1,11 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from app.brokers.kis_client import PriceSnapshot
+from app.scanners.momentum import ScanCandidate
 from app.trading.executor import ExecutionResult
+from app.trading.journal import SignalRecord
 from app.trading.runtime import TradingRuntime
-from app.trading.strategy import KST, Position
+from app.trading.strategy import KST, MarketSignal, Position
 
 
 class FakeSettings:
@@ -15,6 +17,9 @@ class FakeSettings:
     kis_token_cache_path = "data/kis_token_paper.json"
     trading_state_path = "data/test_positions.json"
     trade_journal_path = ":memory:"
+    signal_journal_enabled = True
+    signal_label_max_quotes_per_cycle = 5
+    signal_label_tolerance_seconds = 180
     order_auto_cancel_enabled = True
     order_timeout_seconds = 120
     order_cancel_max_attempts = 3
@@ -155,3 +160,77 @@ def test_runtime_does_not_auto_sell_untracked_account_holding(tmp_path):
     runtime.executor = FailOnUse()
 
     assert runtime._monitor_open_positions(["KR"]) == []
+
+
+def test_runtime_records_candidate_features_and_execution_result(tmp_path):
+    settings = FakeSettings()
+    settings.trading_state_path = str(tmp_path / "positions.json")
+    settings.trade_journal_path = str(tmp_path / "trades.db")
+    runtime = TradingRuntime(settings)
+    signal = MarketSignal(
+        symbol="NVDA",
+        name="NVIDIA",
+        market="US",
+        price=100,
+        change_pct=6,
+        volume_ratio=5,
+        trading_value_krw=5_000_000_000,
+        observed_at=datetime.now(KST),
+        exchange="NAS",
+        one_minute_change_pct=0.5,
+        five_minute_change_pct=1.5,
+        breakout_pct=0.4,
+        vwap_extension_pct=0.8,
+        confirmation_bars=12,
+    )
+
+    runtime._record_signal(
+        ScanCandidate(signal=signal, source="test", score=78),
+        ExecutionResult("SUBMITTED", "NVDA", "accepted", "order-1"),
+    )
+
+    summary = runtime.journal.signal_summary()
+    assert summary["observations"] == 1
+
+
+def test_runtime_labels_due_signal_with_current_quote(tmp_path):
+    settings = FakeSettings()
+    settings.trading_state_path = str(tmp_path / "positions.json")
+    settings.trade_journal_path = str(tmp_path / "trades.db")
+    runtime = TradingRuntime(settings)
+    observed_at = datetime.now(KST).replace(microsecond=0) - timedelta(minutes=5, seconds=30)
+    runtime.journal.record_signal(
+        SignalRecord(
+            symbol="NVDA",
+            name="NVIDIA",
+            market="US",
+            exchange="NAS",
+            observed_at=observed_at,
+            price=100,
+            change_pct=6,
+            volume_ratio=5,
+            trading_value_krw=5_000_000_000,
+            one_minute_change_pct=0.5,
+            five_minute_change_pct=1.5,
+            breakout_pct=0.4,
+            vwap_extension_pct=0.8,
+            confirmation_bars=12,
+            score=78,
+            source="test",
+            strategy_action="BUY",
+            strategy_reason="strong",
+            execution_action="HOLD",
+            execution_reason="account limit",
+        )
+    )
+
+    class FakeClient:
+        def get_overseas_price(self, symbol, exchange):
+            return PriceSnapshot(symbol, "NVIDIA", "US", 103, 7, 6_000_000_000, exchange)
+
+    runtime.client = FakeClient()
+    runtime._label_due_signals(["US"], [])
+
+    summary = runtime.journal.signal_summary()
+    assert summary["labeled_5m"] == 1
+    assert summary["average_return_5m"] == 3

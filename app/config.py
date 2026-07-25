@@ -30,6 +30,9 @@ class Settings(BaseSettings):
 
     trading_state_path: str = "data/paper_positions.json"
     trade_journal_path: str = "data/trades.db"
+    signal_journal_enabled: bool = True
+    signal_label_max_quotes_per_cycle: int = 5
+    signal_label_tolerance_seconds: int = 180
     account_sync_interval_seconds: int = 300
     order_auto_cancel_enabled: bool = True
     order_timeout_seconds: int = 120
