@@ -227,6 +227,100 @@ def test_get_domestic_balance_uses_paper_tr_id_and_summarizes(tmp_path):
     assert summary["profit_loss_pct"] == 25.0
 
 
+def test_get_domestic_buying_power_uses_paper_endpoint(tmp_path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth2/tokenP":
+            return httpx.Response(
+                200,
+                json={"access_token": "token", "token_type": "Bearer", "expires_in": 3600},
+            )
+        if request.url.path == "/uapi/domestic-stock/v1/trading/inquire-psbl-order":
+            assert request.headers["tr_id"] == "VTTC8908R"
+            assert request.url.params["PDNO"] == "005930"
+            assert request.url.params["ORD_UNPR"] == "78000"
+            assert request.url.params["ORD_DVSN"] == "01"
+            return httpx.Response(
+                200,
+                json={
+                    "rt_cd": "0",
+                    "output": {
+                        "nrcvb_buy_amt": "1000000",
+                        "nrcvb_buy_qty": "12",
+                    },
+                },
+            )
+        return httpx.Response(404)
+
+    client = KisClient(
+        app_key="app-key",
+        app_secret="app-secret",
+        account_no="12345678",
+        account_product_code="01",
+        env="paper",
+        token_cache_path=str(tmp_path / "kis_token.json"),
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    result = client.get_buying_power(
+        market="KR",
+        symbol="005930",
+        price=78000,
+    )
+
+    assert result.market == "KR"
+    assert result.available_amount == 1_000_000
+    assert result.available_quantity == 12
+    assert result.currency == "KRW"
+
+
+def test_get_overseas_buying_power_uses_paper_endpoint(tmp_path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth2/tokenP":
+            return httpx.Response(
+                200,
+                json={"access_token": "token", "token_type": "Bearer", "expires_in": 3600},
+            )
+        if request.url.path == "/uapi/overseas-stock/v1/trading/inquire-psamount":
+            assert request.headers["tr_id"] == "VTTS3007R"
+            assert request.url.params["OVRS_EXCG_CD"] == "NYSE"
+            assert request.url.params["OVRS_ORD_UNPR"] == "41.25"
+            assert request.url.params["ITEM_CD"] == "IONQ"
+            return httpx.Response(
+                200,
+                json={
+                    "rt_cd": "0",
+                    "output": {
+                        "tr_crcy_cd": "USD",
+                        "ovrs_ord_psbl_amt": "825.00",
+                        "ord_psbl_qty": "20",
+                    },
+                },
+            )
+        return httpx.Response(404)
+
+    client = KisClient(
+        app_key="app-key",
+        app_secret="app-secret",
+        account_no="12345678",
+        account_product_code="01",
+        env="paper",
+        token_cache_path=str(tmp_path / "kis_token.json"),
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    result = client.get_buying_power(
+        market="US",
+        symbol="ionq",
+        price=41.25,
+        exchange="NYS",
+    )
+
+    assert result.market == "US"
+    assert result.available_amount == 825
+    assert result.available_quantity == 20
+    assert result.currency == "USD"
+
+
 def test_get_domestic_fill_status_uses_order_history(tmp_path):
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/oauth2/tokenP":

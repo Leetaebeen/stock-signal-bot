@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     order_cancel_max_attempts: int = 3
     trading_default_quantity: int = 1
     trading_max_open_positions: int = 1
+    buying_power_check_enabled: bool = True
     entry_min_change_pct: float = 3.0
     entry_max_change_pct: float = 30.0
     entry_min_volume_ratio: float = 4.0

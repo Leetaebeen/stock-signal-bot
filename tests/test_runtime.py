@@ -43,6 +43,7 @@ class FakeSettings:
     max_hold_seconds = 1800
     trading_default_quantity = 1
     trading_max_open_positions = 1
+    buying_power_check_enabled = True
     order_enabled = False
     paper_trading_only = True
     real_trading_enabled = False

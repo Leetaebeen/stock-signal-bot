@@ -5,7 +5,13 @@ from typing import Protocol
 
 from app.alerts.telegram import TelegramAlerter
 from app.alerts.trade_messages import OrderFailure, TradeFill, build_order_failure_message, build_trade_fill_message
-from app.brokers.kis_client import BrokerHolding, CancelResult, OrderFillStatus, OrderResult
+from app.brokers.kis_client import (
+    BrokerHolding,
+    BuyingPower,
+    CancelResult,
+    OrderFillStatus,
+    OrderResult,
+)
 from app.trading.journal import FillRecord, TradeJournal
 from app.trading.state import JsonPositionStore, PendingOrder
 from app.trading.strategy import (
@@ -68,6 +74,16 @@ class TradingBroker(Protocol):
     def get_holdings(self, market: str) -> list[BrokerHolding]:
         ...
 
+    def get_buying_power(
+        self,
+        *,
+        market: str,
+        symbol: str,
+        price: float,
+        exchange: str = "NAS",
+    ) -> BuyingPower:
+        ...
+
     def cancel_order(
         self,
         *,
@@ -101,6 +117,7 @@ class ExecutionConfig:
     auto_cancel_enabled: bool = True
     order_timeout_seconds: int = 120
     cancel_max_attempts: int = 3
+    buying_power_check_enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -150,6 +167,28 @@ class TradingExecutor:
                 signal.symbol,
                 f"최대 보유·매수대기 종목 수 도달: {len(positions) + pending_buys}/{self.config.max_open_positions}",
             )
+
+        if self.config.buying_power_check_enabled:
+            try:
+                buying_power = self.broker.get_buying_power(
+                    market=signal.market,
+                    symbol=signal.symbol,
+                    price=signal.price,
+                    exchange=signal.exchange or self.config.exchange,
+                )
+            except Exception as exc:
+                reason = f"주문 가능 금액 조회 실패: {exc}"
+                logger.warning("buying power check failed symbol=%s reason=%s", signal.symbol, exc)
+                return ExecutionResult("HOLD", signal.symbol, reason)
+            if buying_power.available_quantity < self.config.quantity:
+                return ExecutionResult(
+                    "HOLD",
+                    signal.symbol,
+                    (
+                        f"주문 가능 수량 부족: {buying_power.available_quantity}주 "
+                        f"< 요청 {self.config.quantity}주"
+                    ),
+                )
 
         try:
             order = self._place_order(

@@ -94,6 +94,16 @@ class BrokerHolding:
     exchange: str | None = None
 
 
+@dataclass(frozen=True)
+class BuyingPower:
+    market: str
+    symbol: str
+    available_amount: float
+    available_quantity: int
+    currency: str
+    raw: dict[str, Any]
+
+
 class KisClient:
     def __init__(
         self,
@@ -184,6 +194,82 @@ class KisClient:
                 for item in _dict_list(payload.get("output1"))
                 if _to_float(item.get("ovrs_cblc_qty")) > 0
             ]
+        raise ValueError("market must be KR or US.")
+
+    def get_buying_power(
+        self,
+        *,
+        market: str,
+        symbol: str,
+        price: float,
+        exchange: str = "NAS",
+    ) -> BuyingPower:
+        self._require_account()
+        normalized_market = market.strip().upper()
+        normalized_symbol = symbol.strip().upper()
+        if price <= 0:
+            raise ValueError("price must be greater than zero.")
+
+        if normalized_market == "KR":
+            response = self._get_with_auth_retry(
+                "/uapi/domestic-stock/v1/trading/inquire-psbl-order",
+                tr_id="VTTC8908R" if self.env == "paper" else "TTTC8908R",
+                params={
+                    "CANO": self.account_no,
+                    "ACNT_PRDT_CD": self.account_product_code,
+                    "PDNO": normalized_symbol,
+                    "ORD_UNPR": str(int(price)),
+                    "ORD_DVSN": "01",
+                    "CMA_EVLU_AMT_ICLD_YN": "N",
+                    "OVRS_ICLD_YN": "N",
+                },
+            )
+            payload = _checked_payload(response, "KIS domestic buying power request failed")
+            output = _first_dict(payload.get("output"))
+            return BuyingPower(
+                market="KR",
+                symbol=normalized_symbol,
+                available_amount=_to_float(output.get("nrcvb_buy_amt")),
+                available_quantity=int(_to_float(output.get("nrcvb_buy_qty"))),
+                currency="KRW",
+                raw=output,
+            )
+
+        if normalized_market == "US":
+            response = self._get_with_auth_retry(
+                "/uapi/overseas-stock/v1/trading/inquire-psamount",
+                tr_id="VTTS3007R" if self.env == "paper" else "TTTS3007R",
+                params={
+                    "CANO": self.account_no,
+                    "ACNT_PRDT_CD": self.account_product_code,
+                    "OVRS_EXCG_CD": _overseas_order_exchange_code(exchange),
+                    "OVRS_ORD_UNPR": f"{price:.2f}",
+                    "ITEM_CD": normalized_symbol,
+                },
+            )
+            payload = _checked_payload(response, "KIS overseas buying power request failed")
+            output = _first_dict(payload.get("output"))
+            return BuyingPower(
+                market="US",
+                symbol=normalized_symbol,
+                available_amount=_first_positive_float(
+                    output,
+                    "ovrs_ord_psbl_amt",
+                    "ord_psbl_frcr_amt",
+                    "frcr_ord_psbl_amt1",
+                ),
+                available_quantity=int(
+                    _first_positive_float(
+                        output,
+                        "ord_psbl_qty",
+                        "max_ord_psbl_qty",
+                        "ovrs_max_ord_psbl_qty",
+                    )
+                ),
+                currency=str(output.get("tr_crcy_cd") or "USD"),
+                raw=output,
+            )
+
         raise ValueError("market must be KR or US.")
 
     def get_order_fill_status(
@@ -1006,6 +1092,14 @@ def _to_float(value: Any) -> float:
         return float(text)
     except ValueError:
         return 0.0
+
+
+def _first_positive_float(payload: dict[str, Any], *keys: str) -> float:
+    for key in keys:
+        value = _to_float(payload.get(key))
+        if value > 0:
+            return value
+    return 0.0
 
 
 def _is_rate_limit_response(response: httpx.Response) -> bool:

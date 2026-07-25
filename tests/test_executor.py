@@ -1,6 +1,12 @@
 from datetime import datetime, timedelta
 
-from app.brokers.kis_client import BrokerHolding, CancelResult, OrderFillStatus, OrderResult
+from app.brokers.kis_client import (
+    BrokerHolding,
+    BuyingPower,
+    CancelResult,
+    OrderFillStatus,
+    OrderResult,
+)
 from app.trading.executor import ExecutionConfig, TradingExecutor
 from app.trading.journal import TradeJournal
 from app.trading.state import JsonPositionStore
@@ -55,6 +61,16 @@ class FakeBroker:
 
     def get_holdings(self, market: str) -> list[BrokerHolding]:
         return [item for item in self.holdings if item.market == market]
+
+    def get_buying_power(self, **kwargs) -> BuyingPower:
+        return BuyingPower(
+            market=kwargs["market"],
+            symbol=kwargs["symbol"],
+            available_amount=100_000_000,
+            available_quantity=100,
+            currency="KRW" if kwargs["market"] == "KR" else "USD",
+            raw={},
+        )
 
     def cancel_order(self, **kwargs):
         self.cancellations.append(kwargs)
@@ -126,6 +142,43 @@ def test_executor_blocks_new_entry_when_max_open_positions_reached(tmp_path):
     assert second.action == "HOLD"
     assert "매수대기" in second.reason
     assert len(broker.orders) == 1
+
+
+def test_executor_blocks_entry_when_buying_power_is_insufficient(tmp_path):
+    class InsufficientBroker(FakeBroker):
+        def get_buying_power(self, **kwargs):
+            return BuyingPower(
+                market=kwargs["market"],
+                symbol=kwargs["symbol"],
+                available_amount=50,
+                available_quantity=0,
+                currency="USD",
+                raw={},
+            )
+
+    broker = InsufficientBroker()
+    executor = _executor(tmp_path, broker=broker)
+
+    result = executor.handle_signal(_strong_signal("NVDA", "NVIDIA", "US"))
+
+    assert result.action == "HOLD"
+    assert "주문 가능 수량 부족" in result.reason
+    assert broker.orders == []
+
+
+def test_executor_fails_closed_when_buying_power_query_fails(tmp_path):
+    class FailingBuyingPowerBroker(FakeBroker):
+        def get_buying_power(self, **kwargs):
+            raise RuntimeError("temporary account API error")
+
+    broker = FailingBuyingPowerBroker()
+    executor = _executor(tmp_path, broker=broker)
+
+    result = executor.handle_signal(_strong_signal("NVDA", "NVIDIA", "US"))
+
+    assert result.action == "HOLD"
+    assert "주문 가능 금액 조회 실패" in result.reason
+    assert broker.orders == []
 
 
 def test_executor_sells_existing_position_on_take_profit(tmp_path):
@@ -338,6 +391,16 @@ def test_executor_writes_confirmed_buy_and_sell_to_trade_journal(tmp_path):
 
 def test_executor_notifies_order_failure(tmp_path):
     class FailingBroker:
+        def get_buying_power(self, **kwargs):
+            return BuyingPower(
+                market=kwargs["market"],
+                symbol=kwargs["symbol"],
+                available_amount=100_000,
+                available_quantity=10,
+                currency="USD",
+                raw={},
+            )
+
         def place_domestic_order(self, **kwargs):
             raise RuntimeError("주문 API 오류")
 

@@ -59,6 +59,7 @@ class TradingRuntime:
                 auto_cancel_enabled=settings.order_auto_cancel_enabled,
                 order_timeout_seconds=settings.order_timeout_seconds,
                 cancel_max_attempts=settings.order_cancel_max_attempts,
+                buying_power_check_enabled=settings.buying_power_check_enabled,
             ),
             alerter=TelegramAlerter(
                 enabled=settings.telegram_enabled,
