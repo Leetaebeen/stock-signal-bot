@@ -132,7 +132,21 @@ def _strong_signal(
     price: float = 113.0,
     observed_at=None,
 ) -> MarketSignal:
-    return MarketSignal(symbol, name, market, price, 6.5, 8.0, 8_000_000_000, observed_at or datetime.now(KST))
+    return MarketSignal(
+        symbol,
+        name,
+        market,
+        price,
+        6.5,
+        8.0,
+        8_000_000_000,
+        observed_at or datetime.now(KST),
+        one_minute_change_pct=0.6,
+        five_minute_change_pct=1.8,
+        breakout_pct=0.5,
+        vwap_extension_pct=0.8,
+        confirmation_bars=12,
+    )
 
 
 def _executor(tmp_path, *, broker, alerter=None, store=None, rules=None):

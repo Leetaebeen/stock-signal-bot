@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 import time
 from typing import Any
 
@@ -12,6 +13,7 @@ KIS_RATE_LIMIT_CODE = "EGW00201"
 KIS_RATE_LIMIT_MAX_RETRIES = 2
 KIS_RATE_LIMIT_RETRY_DELAY_SECONDS = 1.2
 USD_KRW_FALLBACK = 1350.0
+KST = timezone(timedelta(hours=9))
 
 
 @dataclass(frozen=True)
@@ -23,6 +25,18 @@ class PriceSnapshot:
     change_pct: float
     trading_value_krw: float
     exchange: str | None = None
+    cumulative_volume: float = 0.0
+
+
+@dataclass(frozen=True)
+class MinuteBar:
+    timestamp: str
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+    trading_value: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -135,6 +149,47 @@ class KisClient:
         if snapshot.price <= 0:
             raise RuntimeError(f"KIS overseas price returned zero price: {exchange}:{symbol}")
         return snapshot
+
+    def get_domestic_minute_bars(self, symbol: str, limit: int = 30) -> list[MinuteBar]:
+        response = self._get_with_auth_retry(
+            "/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice",
+            tr_id="FHKST03010200",
+            params={
+                "FID_COND_MRKT_DIV_CODE": "J",
+                "FID_INPUT_ISCD": symbol,
+                "FID_INPUT_HOUR_1": datetime.now(KST).strftime("%H%M%S"),
+                "FID_PW_DATA_INCU_YN": "Y",
+                "FID_ETC_CLS_CODE": "",
+            },
+        )
+        payload = _checked_payload(response, "KIS domestic minute chart request failed")
+        bars = [_domestic_output_to_minute_bar(item) for item in payload.get("output2") or []]
+        return _sorted_valid_bars(bars, limit)
+
+    def get_overseas_minute_bars(
+        self,
+        symbol: str,
+        exchange: str = "NAS",
+        limit: int = 20,
+    ) -> list[MinuteBar]:
+        response = self._get_with_auth_retry(
+            "/uapi/overseas-price/v1/quotations/inquire-time-itemchartprice",
+            tr_id="HHDFS76950200",
+            params={
+                "AUTH": "",
+                "EXCD": exchange,
+                "SYMB": symbol,
+                "NMIN": "1",
+                "PINC": "1",
+                "NEXT": "",
+                "NREC": str(max(8, min(limit, 120))),
+                "FILL": "",
+                "KEYB": "",
+            },
+        )
+        payload = _checked_payload(response, "KIS overseas minute chart request failed")
+        bars = [_overseas_output_to_minute_bar(item) for item in payload.get("output2") or []]
+        return _sorted_valid_bars(bars, limit)
 
     def place_domestic_order(
         self,
@@ -528,6 +583,7 @@ def _domestic_output_to_snapshot(symbol: str, name: str | None, output: dict[str
         price=price,
         change_pct=_to_float(output.get("prdy_ctrt")),
         trading_value_krw=trading_value,
+        cumulative_volume=volume,
     )
 
 
@@ -551,7 +607,38 @@ def _overseas_output_to_snapshot(
         change_pct=_to_float(output.get("rate")),
         trading_value_krw=trading_value_usd * USD_KRW_FALLBACK,
         exchange=exchange,
+        cumulative_volume=volume,
     )
+
+
+def _domestic_output_to_minute_bar(output: dict[str, Any]) -> MinuteBar:
+    return MinuteBar(
+        timestamp=f"{output.get('stck_bsop_date') or ''}{output.get('stck_cntg_hour') or ''}",
+        open=_to_float(output.get("stck_oprc")),
+        high=_to_float(output.get("stck_hgpr")),
+        low=_to_float(output.get("stck_lwpr")),
+        close=_to_float(output.get("stck_prpr")),
+        volume=_to_float(output.get("cntg_vol")),
+        trading_value=_to_float(output.get("acml_tr_pbmn")),
+    )
+
+
+def _overseas_output_to_minute_bar(output: dict[str, Any]) -> MinuteBar:
+    return MinuteBar(
+        timestamp=f"{output.get('xymd') or output.get('kymd') or ''}{output.get('xhms') or output.get('khms') or ''}",
+        open=_to_float(output.get("open")),
+        high=_to_float(output.get("high")),
+        low=_to_float(output.get("low")),
+        close=_to_float(output.get("last")),
+        volume=_to_float(output.get("evol")),
+        trading_value=_to_float(output.get("eamt")),
+    )
+
+
+def _sorted_valid_bars(bars: list[MinuteBar], limit: int) -> list[MinuteBar]:
+    valid = [bar for bar in bars if bar.close > 0 and bar.volume >= 0]
+    ordered = sorted(valid, key=lambda bar: bar.timestamp)
+    return ordered[-max(limit, 1) :]
 
 
 def _first_dict(value: Any) -> dict[str, Any]:

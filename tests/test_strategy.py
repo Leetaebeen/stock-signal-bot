@@ -13,6 +13,11 @@ def test_entry_buys_when_momentum_volume_value_and_score_pass():
         change_pct=6.5,
         volume_ratio=8.0,
         trading_value_krw=8_000_000_000,
+        one_minute_change_pct=0.6,
+        five_minute_change_pct=1.8,
+        breakout_pct=0.5,
+        vwap_extension_pct=0.8,
+        confirmation_bars=12,
     )
 
     decision = evaluate_entry(signal, StrategyRules())
@@ -65,6 +70,11 @@ def test_entry_holds_when_strategy_score_is_too_low():
         change_pct=3.2,
         volume_ratio=4.2,
         trading_value_krw=1_100_000_000,
+        one_minute_change_pct=0.2,
+        five_minute_change_pct=0.6,
+        breakout_pct=0.05,
+        vwap_extension_pct=2.4,
+        confirmation_bars=12,
     )
 
     decision = evaluate_entry(signal, StrategyRules(entry_min_score=80))
@@ -124,7 +134,17 @@ def test_exit_sells_on_trailing_drawdown():
 def test_position_store_round_trips(tmp_path):
     entry_at = datetime(2026, 7, 5, 10, 0, 0, tzinfo=KST)
     position = open_position(
-        MarketSignal("005930", "삼성전자", "KR", 78000.0, 4.0, 6.0, 2_000_000_000, entry_at),
+        MarketSignal(
+            "005930",
+            "삼성전자",
+            "KR",
+            78000.0,
+            4.0,
+            6.0,
+            2_000_000_000,
+            entry_at,
+            exchange="KRX",
+        ),
         quantity=2,
     )
     store = JsonPositionStore(tmp_path / "positions.json")
@@ -135,5 +155,6 @@ def test_position_store_round_trips(tmp_path):
 
     assert loaded["005930"].name == "삼성전자"
     assert loaded["005930"].entry_price == 78000.0
+    assert loaded["005930"].exchange == "KRX"
     assert removed is not None
     assert store.load() == {}

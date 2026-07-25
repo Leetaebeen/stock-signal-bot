@@ -18,6 +18,11 @@ def main() -> None:
     parser.add_argument("--change-pct", type=float, required=True)
     parser.add_argument("--volume-ratio", type=float, required=True)
     parser.add_argument("--trading-value-krw", type=float, required=True)
+    parser.add_argument("--one-minute-change-pct", type=float, default=0.6)
+    parser.add_argument("--five-minute-change-pct", type=float, default=1.8)
+    parser.add_argument("--breakout-pct", type=float, default=0.5)
+    parser.add_argument("--vwap-extension-pct", type=float, default=0.8)
+    parser.add_argument("--confirmation-bars", type=int, default=12)
     parser.add_argument("--exchange", default="NAS")
     parser.add_argument("--session", choices=["regular", "day", "pre", "after"], default="regular")
     parser.add_argument("--execute", action="store_true")
@@ -34,6 +39,12 @@ def main() -> None:
         volume_ratio=args.volume_ratio,
         trading_value_krw=args.trading_value_krw,
         observed_at=datetime.now(KST),
+        exchange=args.exchange,
+        one_minute_change_pct=args.one_minute_change_pct,
+        five_minute_change_pct=args.five_minute_change_pct,
+        breakout_pct=args.breakout_pct,
+        vwap_extension_pct=args.vwap_extension_pct,
+        confirmation_bars=args.confirmation_bars,
     )
 
     decision = evaluate_entry(signal, rules)
@@ -90,6 +101,14 @@ def _rules_from_settings(settings) -> StrategyRules:
         entry_min_volume_ratio=settings.entry_min_volume_ratio,
         entry_max_volume_ratio=settings.entry_max_volume_ratio,
         entry_min_trading_value_krw=settings.entry_min_trading_value_krw,
+        entry_min_score=settings.entry_min_score,
+        entry_min_confirmation_bars=settings.entry_min_confirmation_bars,
+        entry_min_one_minute_change_pct=settings.entry_min_one_minute_change_pct,
+        entry_max_one_minute_change_pct=settings.entry_max_one_minute_change_pct,
+        entry_min_five_minute_change_pct=settings.entry_min_five_minute_change_pct,
+        entry_max_five_minute_change_pct=settings.entry_max_five_minute_change_pct,
+        entry_min_breakout_pct=settings.entry_min_breakout_pct,
+        entry_max_vwap_extension_pct=settings.entry_max_vwap_extension_pct,
         take_profit_pct=settings.take_profit_pct,
         stop_loss_pct=settings.stop_loss_pct,
         trailing_start_pct=settings.trailing_start_pct,

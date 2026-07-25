@@ -15,6 +15,13 @@ class StrategyRules:
     entry_max_volume_ratio: float = 20.0
     entry_min_trading_value_krw: float = 1_000_000_000
     entry_min_score: int = 65
+    entry_min_confirmation_bars: int = 8
+    entry_min_one_minute_change_pct: float = 0.15
+    entry_max_one_minute_change_pct: float = 2.5
+    entry_min_five_minute_change_pct: float = 0.5
+    entry_max_five_minute_change_pct: float = 5.0
+    entry_min_breakout_pct: float = 0.0
+    entry_max_vwap_extension_pct: float = 2.5
     take_profit_pct: float = 5.0
     stop_loss_pct: float = -2.0
     trailing_start_pct: float = 3.0
@@ -32,6 +39,12 @@ class MarketSignal:
     volume_ratio: float
     trading_value_krw: float
     observed_at: datetime | None = None
+    exchange: str | None = None
+    one_minute_change_pct: float = 0.0
+    five_minute_change_pct: float = 0.0
+    breakout_pct: float = 0.0
+    vwap_extension_pct: float = 0.0
+    confirmation_bars: int = 0
 
 
 @dataclass(frozen=True)
@@ -43,6 +56,7 @@ class Position:
     entry_price: float
     entry_at: datetime
     highest_price: float
+    exchange: str | None = None
 
     def with_price(self, price: float) -> "Position":
         return replace(self, highest_price=max(self.highest_price, price))
@@ -76,6 +90,25 @@ def evaluate_entry(signal: MarketSignal, rules: StrategyRules) -> TradeDecision:
         return TradeDecision("HOLD", f"거래량 배율 {signal.volume_ratio:.2f}배가 과열 기준 초과")
     if signal.trading_value_krw < rules.entry_min_trading_value_krw:
         return TradeDecision("HOLD", f"거래대금 {signal.trading_value_krw:,.0f}원이 기준 미달")
+    if signal.confirmation_bars < rules.entry_min_confirmation_bars:
+        return TradeDecision(
+            "HOLD",
+            f"분봉 확인 {signal.confirmation_bars}개가 기준 {rules.entry_min_confirmation_bars}개 미달",
+        )
+    if signal.one_minute_change_pct < rules.entry_min_one_minute_change_pct:
+        return TradeDecision("HOLD", f"1분 상승률 {signal.one_minute_change_pct:.2f}%가 기준 미달")
+    if signal.one_minute_change_pct > rules.entry_max_one_minute_change_pct:
+        return TradeDecision("HOLD", f"1분 상승률 {signal.one_minute_change_pct:.2f}%가 추격매수 제한 초과")
+    if signal.five_minute_change_pct < rules.entry_min_five_minute_change_pct:
+        return TradeDecision("HOLD", f"5분 상승률 {signal.five_minute_change_pct:.2f}%가 기준 미달")
+    if signal.five_minute_change_pct > rules.entry_max_five_minute_change_pct:
+        return TradeDecision("HOLD", f"5분 상승률 {signal.five_minute_change_pct:.2f}%가 과열 기준 초과")
+    if signal.breakout_pct < rules.entry_min_breakout_pct:
+        return TradeDecision("HOLD", f"직전 고점 대비 {signal.breakout_pct:+.2f}%로 돌파 확인 실패")
+    if signal.vwap_extension_pct < 0:
+        return TradeDecision("HOLD", f"현재가가 단기 VWAP 아래 {signal.vwap_extension_pct:.2f}%")
+    if signal.vwap_extension_pct > rules.entry_max_vwap_extension_pct:
+        return TradeDecision("HOLD", f"VWAP 이격 {signal.vwap_extension_pct:.2f}%가 추격매수 제한 초과")
 
     score = entry_score(signal, rules)
     if score < rules.entry_min_score:
@@ -84,8 +117,9 @@ def evaluate_entry(signal: MarketSignal, rules: StrategyRules) -> TradeDecision:
     return TradeDecision(
         "BUY",
         (
-            f"전략 점수 {score}점 통과: 등락률 {signal.change_pct:.2f}%, "
-            f"거래량 {signal.volume_ratio:.2f}배, 거래대금 {signal.trading_value_krw:,.0f}원"
+            f"전략 점수 {score}점 통과: 당일 {signal.change_pct:.2f}%, "
+            f"1분 {signal.one_minute_change_pct:.2f}%, 5분 {signal.five_minute_change_pct:.2f}%, "
+            f"분봉 거래량 {signal.volume_ratio:.2f}배, 고점 돌파 {signal.breakout_pct:+.2f}%"
         ),
         score=score,
     )
@@ -138,15 +172,38 @@ def open_position(signal: MarketSignal, quantity: float, entry_at: datetime | No
         entry_price=signal.price,
         entry_at=entry_at or signal.observed_at or datetime.now(KST),
         highest_price=signal.price,
+        exchange=signal.exchange,
     )
 
 
 def entry_score(signal: MarketSignal, rules: StrategyRules) -> int:
-    change_score = _score_change(signal.change_pct, rules)
-    volume_score = _score_volume(signal.volume_ratio, rules)
-    value_score = _score_trading_value(signal.trading_value_krw, rules)
-    overheat_penalty = _overheat_penalty(signal.change_pct, signal.volume_ratio, rules)
-    return round(max(change_score + volume_score + value_score - overheat_penalty, 0))
+    change_score = _score_change(signal.change_pct, rules) * (15 / 35)
+    volume_score = _score_volume(signal.volume_ratio, rules) * (25 / 35)
+    value_score = _score_trading_value(signal.trading_value_krw, rules) * (15 / 30)
+    one_minute_score = _window_score(
+        signal.one_minute_change_pct,
+        rules.entry_min_one_minute_change_pct,
+        rules.entry_max_one_minute_change_pct,
+    ) * 10
+    five_minute_score = _window_score(
+        signal.five_minute_change_pct,
+        rules.entry_min_five_minute_change_pct,
+        rules.entry_max_five_minute_change_pct,
+    ) * 15
+    breakout_score = _scale(signal.breakout_pct, rules.entry_min_breakout_pct, 1.0) * 10
+    vwap_score = (1 - _scale(signal.vwap_extension_pct, 1.0, rules.entry_max_vwap_extension_pct)) * 10
+    overheat_penalty = _overheat_penalty(signal.change_pct, signal.volume_ratio, rules) * 0.5
+    total = (
+        change_score
+        + volume_score
+        + value_score
+        + one_minute_score
+        + five_minute_score
+        + breakout_score
+        + vwap_score
+        - overheat_penalty
+    )
+    return round(max(min(total, 100), 0))
 
 
 def _score_change(change_pct: float, rules: StrategyRules) -> float:
@@ -158,7 +215,7 @@ def _score_change(change_pct: float, rules: StrategyRules) -> float:
 
 
 def _score_volume(volume_ratio: float, rules: StrategyRules) -> float:
-    sweet_spot = min(max(rules.entry_min_volume_ratio * 3, rules.entry_min_volume_ratio + 1), rules.entry_max_volume_ratio)
+    sweet_spot = min(max(rules.entry_min_volume_ratio * 2, rules.entry_min_volume_ratio + 1), rules.entry_max_volume_ratio)
     if volume_ratio <= sweet_spot:
         return _scale(volume_ratio, rules.entry_min_volume_ratio, sweet_spot) * 35
     return (1 - _scale(volume_ratio, sweet_spot, rules.entry_max_volume_ratio) * 0.30) * 35
@@ -179,3 +236,12 @@ def _scale(value: float, floor: float, ceiling: float) -> float:
     if ceiling <= floor:
         return 1.0 if value >= ceiling else 0.0
     return min(max((value - floor) / (ceiling - floor), 0), 1)
+
+
+def _window_score(value: float, floor: float, ceiling: float) -> float:
+    if value < floor or value > ceiling:
+        return 0.0
+    sweet_spot = floor + ((ceiling - floor) * 0.45)
+    if value <= sweet_spot:
+        return 0.5 + (_scale(value, floor, sweet_spot) * 0.5)
+    return 1 - (_scale(value, sweet_spot, ceiling) * 0.35)

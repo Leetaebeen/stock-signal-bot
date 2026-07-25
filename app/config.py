@@ -37,6 +37,13 @@ class Settings(BaseSettings):
     entry_max_volume_ratio: float = 20.0
     entry_min_trading_value_krw: float = 1_000_000_000
     entry_min_score: int = 65
+    entry_min_confirmation_bars: int = 8
+    entry_min_one_minute_change_pct: float = 0.15
+    entry_max_one_minute_change_pct: float = 2.5
+    entry_min_five_minute_change_pct: float = 0.5
+    entry_max_five_minute_change_pct: float = 5.0
+    entry_min_breakout_pct: float = 0.0
+    entry_max_vwap_extension_pct: float = 2.5
     take_profit_pct: float = 5.0
     stop_loss_pct: float = -2.0
     trailing_start_pct: float = 3.0
@@ -54,6 +61,10 @@ class Settings(BaseSettings):
         "RIVN,WBD,OPEN,TQQQ,SQQQ,UBER,ABNB,DKNG,GM,CHWY,SNOW,PATH,U,AI,CVNA,SE,ELF,CELH,DELL"
     )
     us_scan_symbols_path: str | None = None
+    us_symbol_exchanges: str = (
+        "IONQ:NYS,NET:NYS,UBER:NYS,GM:NYS,CHWY:NYS,SNOW:NYS,PATH:NYS,U:NYS,AI:NYS,"
+        "CVNA:NYS,SE:NYS,ELF:NYS,DELL:NYS"
+    )
     kr_scan_symbols: str = (
         "005930,000660,035420,035720,005380,068270,247540,086520,028300,196170,277810,042700,"
         "010140,009540,329180,402340,373220,006400,051910,096770,005490,034020,011200,010130,"

@@ -4,7 +4,8 @@ from pathlib import Path
 
 from app.brokers.kis_client import KisClient, summarize_domestic_balance
 from app.config import Settings, get_settings
-from app.scanners.momentum import MomentumScanner, TradingValueBaseline, load_symbols_from_file, parse_symbol_list
+from app.scanners.momentum import MomentumScanner, load_symbols_from_file, parse_exchange_map, parse_symbol_list
+from app.trading.runtime import _rules_from_settings
 from app.trading.sessions import KST, SessionPolicy, active_markets, market_closed_reason
 
 
@@ -126,14 +127,20 @@ def _check_scanner(settings: Settings, client: KisClient) -> CheckResult:
 
     scanner = MomentumScanner(
         quote_client=client,
-        baseline=TradingValueBaseline(),
+        rules=_rules_from_settings(settings),
         exchange=settings.us_order_exchange,
         request_delay_seconds=settings.quote_request_delay_seconds,
     )
     try:
         candidates = []
         if us_symbols:
-            candidates.extend(scanner.scan_us(us_symbols[:2], limit=2))
+            candidates.extend(
+                scanner.scan_us(
+                    us_symbols[:2],
+                    limit=2,
+                    exchange_by_symbol=parse_exchange_map(settings.us_symbol_exchanges),
+                )
+            )
         if kr_symbols:
             candidates.extend(scanner.scan_kr(kr_symbols[:2], limit=2))
     except Exception as exc:

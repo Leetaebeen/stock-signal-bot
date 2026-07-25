@@ -1,4 +1,9 @@
+from datetime import datetime
+
+from app.brokers.kis_client import PriceSnapshot
+from app.trading.executor import ExecutionResult
 from app.trading.runtime import TradingRuntime
+from app.trading.strategy import KST, Position
 
 
 class FakeSettings:
@@ -15,6 +20,13 @@ class FakeSettings:
     entry_max_volume_ratio = 20.0
     entry_min_trading_value_krw = 1_000_000_000
     entry_min_score = 65
+    entry_min_confirmation_bars = 8
+    entry_min_one_minute_change_pct = 0.15
+    entry_max_one_minute_change_pct = 2.5
+    entry_min_five_minute_change_pct = 0.5
+    entry_max_five_minute_change_pct = 5.0
+    entry_min_breakout_pct = 0.0
+    entry_max_vwap_extension_pct = 2.5
     take_profit_pct = 5.0
     stop_loss_pct = -2.0
     trailing_start_pct = 3.0
@@ -37,6 +49,7 @@ class FakeSettings:
     kr_scan_batch_size = 1
     us_scan_symbols = "NVDA, HOOD, NVDA"
     us_scan_symbols_path = None
+    us_symbol_exchanges = "IONQ:NYS"
     kr_scan_symbols = "005930, 000660, 005930"
     kr_scan_symbols_path = None
     quote_request_delay_seconds = 0.0
@@ -60,3 +73,51 @@ def test_runtime_rotates_us_and_kr_scan_batches():
     assert runtime._next_kr_symbols() == ["005930"]
     assert runtime._next_kr_symbols() == ["000660"]
     assert runtime._next_kr_symbols() == ["005930"]
+
+
+def test_runtime_parses_us_exchange_map():
+    runtime = TradingRuntime(FakeSettings())
+
+    assert runtime._us_exchange_map() == {"IONQ": "NYS"}
+
+
+def test_runtime_monitors_open_position_before_candidate_scan(tmp_path):
+    settings = FakeSettings()
+    settings.trading_state_path = str(tmp_path / "positions.json")
+    runtime = TradingRuntime(settings)
+    runtime.store.save(
+        {
+            "IONQ": Position(
+                symbol="IONQ",
+                name="IonQ",
+                market="US",
+                quantity=1,
+                entry_price=40.0,
+                entry_at=datetime(2026, 7, 24, 22, 30, tzinfo=KST),
+                highest_price=41.0,
+                exchange="NYS",
+            )
+        }
+    )
+
+    class FakeClient:
+        def get_overseas_price(self, symbol, exchange, name):
+            assert symbol == "IONQ"
+            assert exchange == "NYS"
+            return PriceSnapshot("IONQ", name, "US", 41.0, 5.0, 5_000_000_000, "NYS")
+
+    class FakeExecutor:
+        def __init__(self):
+            self.signals = []
+
+        def handle_signal(self, signal):
+            self.signals.append(signal)
+            return ExecutionResult("HOLD", signal.symbol, "보유")
+
+    runtime.client = FakeClient()
+    runtime.executor = FakeExecutor()
+
+    results = runtime._monitor_open_positions(["US"])
+
+    assert results[0].symbol == "IONQ"
+    assert runtime.executor.signals[0].price == 41.0

@@ -50,4 +50,5 @@ def _position_from_json(payload: dict[str, object]) -> Position:
         entry_price=float(payload["entry_price"]),
         entry_at=entry_at,
         highest_price=float(payload["highest_price"]),
+        exchange=str(payload["exchange"]) if payload.get("exchange") else None,
     )

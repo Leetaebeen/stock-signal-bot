@@ -187,7 +187,7 @@ class TradingExecutor:
             symbol=signal.symbol,
             quantity=quantity,
             price=price,
-            exchange=self.config.exchange,
+            exchange=signal.exchange or self.config.exchange,
             order_type=self.config.order_type,
             session=self.config.session,
             order_enabled=self.config.order_enabled,

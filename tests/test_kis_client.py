@@ -44,6 +44,7 @@ def test_get_domestic_price_maps_kis_output(tmp_path):
     assert snapshot.price == 78500
     assert snapshot.change_pct == 1.23
     assert snapshot.trading_value_krw == 96913509500
+    assert snapshot.cumulative_volume == 1234567
 
 
 def test_get_overseas_price_maps_kis_output(tmp_path):
@@ -85,6 +86,101 @@ def test_get_overseas_price_maps_kis_output(tmp_path):
     assert snapshot.change_pct == 5.6
     assert snapshot.trading_value_krw == 144200000 * 1_350
     assert snapshot.exchange == "NAS"
+    assert snapshot.cumulative_volume == 1000000
+
+
+def test_get_domestic_minute_bars_maps_and_sorts_output(tmp_path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth2/tokenP":
+            return httpx.Response(200, json={"access_token": "token", "token_type": "Bearer", "expires_in": 3600})
+        if request.url.path == "/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice":
+            assert request.headers["tr_id"] == "FHKST03010200"
+            assert request.url.params["FID_INPUT_ISCD"] == "005930"
+            return httpx.Response(
+                200,
+                json={
+                    "rt_cd": "0",
+                    "output2": [
+                        {
+                            "stck_bsop_date": "20260724",
+                            "stck_cntg_hour": "093100",
+                            "stck_oprc": "101",
+                            "stck_hgpr": "103",
+                            "stck_lwpr": "100",
+                            "stck_prpr": "102",
+                            "cntg_vol": "5000",
+                        },
+                        {
+                            "stck_bsop_date": "20260724",
+                            "stck_cntg_hour": "093000",
+                            "stck_oprc": "100",
+                            "stck_hgpr": "102",
+                            "stck_lwpr": "99",
+                            "stck_prpr": "101",
+                            "cntg_vol": "1000",
+                        },
+                    ],
+                },
+            )
+        return httpx.Response(404)
+
+    client = KisClient(
+        app_key="app-key",
+        app_secret="app-secret",
+        env="paper",
+        token_cache_path=str(tmp_path / "kis_token.json"),
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    bars = client.get_domestic_minute_bars("005930", limit=2)
+
+    assert [bar.timestamp for bar in bars] == ["20260724093000", "20260724093100"]
+    assert bars[-1].close == 102
+    assert bars[-1].volume == 5000
+
+
+def test_get_overseas_minute_bars_uses_symbol_exchange(tmp_path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth2/tokenP":
+            return httpx.Response(200, json={"access_token": "token", "token_type": "Bearer", "expires_in": 3600})
+        if request.url.path == "/uapi/overseas-price/v1/quotations/inquire-time-itemchartprice":
+            assert request.headers["tr_id"] == "HHDFS76950200"
+            assert request.url.params["EXCD"] == "NYS"
+            assert request.url.params["SYMB"] == "IONQ"
+            assert request.url.params["NMIN"] == "1"
+            return httpx.Response(
+                200,
+                json={
+                    "rt_cd": "0",
+                    "output2": [
+                        {
+                            "xymd": "20260724",
+                            "xhms": "093000",
+                            "open": "40.10",
+                            "high": "40.50",
+                            "low": "40.00",
+                            "last": "40.40",
+                            "evol": "12000",
+                            "eamt": "484800",
+                        }
+                    ],
+                },
+            )
+        return httpx.Response(404)
+
+    client = KisClient(
+        app_key="app-key",
+        app_secret="app-secret",
+        env="paper",
+        token_cache_path=str(tmp_path / "kis_token.json"),
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    bars = client.get_overseas_minute_bars("IONQ", exchange="NYS", limit=20)
+
+    assert bars[0].timestamp == "20260724093000"
+    assert bars[0].close == 40.4
+    assert bars[0].volume == 12000
 
 
 def test_get_domestic_balance_uses_paper_tr_id_and_summarizes(tmp_path):

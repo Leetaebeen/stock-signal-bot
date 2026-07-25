@@ -1,13 +1,14 @@
 import logging
+from datetime import datetime
 
 from app.alerts.telegram import TelegramAlerter
 from app.brokers.kis_client import KisClient
 from app.config import Settings
-from app.scanners.momentum import MomentumScanner, TradingValueBaseline, load_symbols_from_file, parse_symbol_list
+from app.scanners.momentum import MomentumScanner, load_symbols_from_file, parse_exchange_map, parse_symbol_list
 from app.trading.executor import ExecutionConfig, ExecutionResult, TradingExecutor
 from app.trading.sessions import SessionPolicy, active_markets, market_closed_reason
 from app.trading.state import JsonPositionStore
-from app.trading.strategy import StrategyRules
+from app.trading.strategy import KST, MarketSignal, StrategyRules
 
 
 logger = logging.getLogger(__name__)
@@ -16,6 +17,8 @@ logger = logging.getLogger(__name__)
 class TradingRuntime:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self.rules = _rules_from_settings(settings)
+        self.store = JsonPositionStore(settings.trading_state_path)
         self.client = KisClient(
             app_key=settings.kis_app_key,
             app_secret=settings.kis_app_secret,
@@ -26,14 +29,14 @@ class TradingRuntime:
         )
         self.scanner = MomentumScanner(
             quote_client=self.client,
-            baseline=TradingValueBaseline(),
+            rules=self.rules,
             exchange=settings.us_order_exchange,
             request_delay_seconds=settings.quote_request_delay_seconds,
         )
         self.executor = TradingExecutor(
             broker=self.client,
-            store=JsonPositionStore(settings.trading_state_path),
-            rules=_rules_from_settings(settings),
+            store=self.store,
+            rules=self.rules,
             config=ExecutionConfig(
                 quantity=settings.trading_default_quantity,
                 max_open_positions=settings.trading_max_open_positions,
@@ -63,16 +66,29 @@ class TradingRuntime:
         candidates = []
         active = active_markets(self.session_policy, us_session=self.settings.us_order_session)
         logger.info("scan cycle active_markets=%s", ",".join(active) if active else "NONE")
+        positions_at_cycle_start = set(self.store.load())
+        results = self._monitor_open_positions(active)
+        excluded_symbols = positions_at_cycle_start | set(self.store.load())
         us_symbols = self._next_us_symbols() if "US" in active else []
         kr_symbols = self._next_kr_symbols() if "KR" in active else []
         if us_symbols:
-            candidates.extend(self.scanner.scan_us(us_symbols, limit=self.settings.scan_candidate_limit))
+            candidates.extend(
+                self.scanner.scan_us(
+                    [symbol for symbol in us_symbols if symbol not in excluded_symbols],
+                    limit=self.settings.scan_candidate_limit,
+                    exchange_by_symbol=self._us_exchange_map(),
+                )
+            )
         if kr_symbols:
-            candidates.extend(self.scanner.scan_kr(kr_symbols, limit=self.settings.scan_candidate_limit))
+            candidates.extend(
+                self.scanner.scan_kr(
+                    [symbol for symbol in kr_symbols if symbol not in excluded_symbols],
+                    limit=self.settings.scan_candidate_limit,
+                )
+            )
         if not candidates:
-            logger.info("scan skipped: no open market or no symbols configured")
-            return []
-        results: list[ExecutionResult] = []
+            logger.info("scan completed: no entry candidate")
+            return results
         for candidate in sorted(candidates, key=lambda item: item.score, reverse=True)[: self.settings.scan_candidate_limit]:
             if not self._can_trade(candidate.signal.market):
                 reason = market_closed_reason(candidate.signal.market, session=self.settings.us_order_session)
@@ -81,6 +97,39 @@ class TradingRuntime:
                 continue
             result = self.executor.handle_signal(candidate.signal)
             logger.info("scan result symbol=%s action=%s reason=%s", result.symbol, result.action, result.reason)
+            results.append(result)
+        return results
+
+    def _monitor_open_positions(self, active_markets_now: list[str]) -> list[ExecutionResult]:
+        results: list[ExecutionResult] = []
+        for position in self.store.load().values():
+            if position.market.upper() not in active_markets_now:
+                continue
+            try:
+                if position.market.upper() == "KR":
+                    snapshot = self.client.get_domestic_price(position.symbol, name=position.name)
+                else:
+                    snapshot = self.client.get_overseas_price(
+                        position.symbol,
+                        exchange=position.exchange or self.settings.us_order_exchange,
+                        name=position.name,
+                    )
+            except Exception as exc:
+                logger.warning("position quote skipped symbol=%s reason=%s", position.symbol, exc)
+                continue
+            signal = MarketSignal(
+                symbol=position.symbol,
+                name=position.name,
+                market=position.market,
+                price=snapshot.price,
+                change_pct=snapshot.change_pct,
+                volume_ratio=0.0,
+                trading_value_krw=snapshot.trading_value_krw,
+                observed_at=datetime.now(KST),
+                exchange=position.exchange or snapshot.exchange,
+            )
+            result = self.executor.handle_signal(signal)
+            logger.info("position result symbol=%s action=%s reason=%s", result.symbol, result.action, result.reason)
             results.append(result)
         return results
 
@@ -97,6 +146,9 @@ class TradingRuntime:
         symbols = parse_symbol_list(self.settings.kr_scan_symbols)
         symbols.extend(load_symbols_from_file(self.settings.kr_scan_symbols_path))
         return _dedupe(symbols)
+
+    def _us_exchange_map(self) -> dict[str, str]:
+        return parse_exchange_map(self.settings.us_symbol_exchanges)
 
     def _next_us_symbols(self) -> list[str]:
         symbols, self._us_cursor = _next_batch(
@@ -146,6 +198,13 @@ def _rules_from_settings(settings: Settings) -> StrategyRules:
         entry_max_volume_ratio=settings.entry_max_volume_ratio,
         entry_min_trading_value_krw=settings.entry_min_trading_value_krw,
         entry_min_score=settings.entry_min_score,
+        entry_min_confirmation_bars=settings.entry_min_confirmation_bars,
+        entry_min_one_minute_change_pct=settings.entry_min_one_minute_change_pct,
+        entry_max_one_minute_change_pct=settings.entry_max_one_minute_change_pct,
+        entry_min_five_minute_change_pct=settings.entry_min_five_minute_change_pct,
+        entry_max_five_minute_change_pct=settings.entry_max_five_minute_change_pct,
+        entry_min_breakout_pct=settings.entry_min_breakout_pct,
+        entry_max_vwap_extension_pct=settings.entry_max_vwap_extension_pct,
         take_profit_pct=settings.take_profit_pct,
         stop_loss_pct=settings.stop_loss_pct,
         trailing_start_pct=settings.trailing_start_pct,
