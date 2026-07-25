@@ -1,9 +1,23 @@
 import json
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 
 from app.trading.strategy import KST, Position
+
+
+@dataclass(frozen=True)
+class PendingOrder:
+    order_no: str
+    market: str
+    side: str
+    symbol: str
+    name: str
+    quantity: float
+    requested_price: float
+    submitted_at: datetime
+    reason: str
+    exchange: str | None = None
 
 
 class JsonPositionStore:
@@ -11,16 +25,15 @@ class JsonPositionStore:
         self.path = Path(path)
 
     def load(self) -> dict[str, Position]:
-        if not self.path.exists():
-            return {}
-        payload = json.loads(self.path.read_text(encoding="utf-8"))
+        payload = self._read()
         positions = payload.get("positions") or []
         return {item["symbol"]: _position_from_json(item) for item in positions}
 
     def save(self, positions: dict[str, Position]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"positions": [_position_to_json(position) for position in positions.values()]}
-        self.path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        payload = self._read()
+        payload["positions"] = [_position_to_json(position) for position in positions.values()]
+        payload.setdefault("pending_orders", [])
+        self._write(payload)
 
     def upsert(self, position: Position) -> None:
         positions = self.load()
@@ -32,6 +45,60 @@ class JsonPositionStore:
         removed = positions.pop(symbol, None)
         self.save(positions)
         return removed
+
+    def load_pending_orders(self) -> list[PendingOrder]:
+        payload = self._read()
+        return [_pending_order_from_json(item) for item in payload.get("pending_orders") or []]
+
+    def save_pending_orders(self, orders: list[PendingOrder]) -> None:
+        payload = self._read()
+        payload.setdefault("positions", [])
+        payload["pending_orders"] = [_pending_order_to_json(order) for order in orders]
+        self._write(payload)
+
+    def save_state(
+        self,
+        positions: dict[str, Position],
+        pending_orders: list[PendingOrder],
+    ) -> None:
+        self._write(
+            {
+                "positions": [_position_to_json(position) for position in positions.values()],
+                "pending_orders": [_pending_order_to_json(order) for order in pending_orders],
+            }
+        )
+
+    def add_pending_order(self, order: PendingOrder) -> None:
+        orders = [item for item in self.load_pending_orders() if item.order_no != order.order_no]
+        orders.append(order)
+        self.save_pending_orders(orders)
+
+    def remove_pending_order(self, order_no: str) -> PendingOrder | None:
+        orders = self.load_pending_orders()
+        removed = next((item for item in orders if item.order_no == order_no), None)
+        self.save_pending_orders([item for item in orders if item.order_no != order_no])
+        return removed
+
+    def pending_for_symbol(self, symbol: str) -> PendingOrder | None:
+        normalized = symbol.strip().upper()
+        return next(
+            (item for item in self.load_pending_orders() if item.symbol.strip().upper() == normalized),
+            None,
+        )
+
+    def _read(self) -> dict[str, object]:
+        if not self.path.exists():
+            return {"positions": [], "pending_orders": []}
+        payload = json.loads(self.path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError(f"Invalid trading state file: {self.path}")
+        return payload
+
+    def _write(self, payload: dict[str, object]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path = self.path.with_suffix(f"{self.path.suffix}.tmp")
+        temporary_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary_path.replace(self.path)
 
 
 def _position_to_json(position: Position) -> dict[str, object]:
@@ -50,5 +117,27 @@ def _position_from_json(payload: dict[str, object]) -> Position:
         entry_price=float(payload["entry_price"]),
         entry_at=entry_at,
         highest_price=float(payload["highest_price"]),
+        exchange=str(payload["exchange"]) if payload.get("exchange") else None,
+        managed=bool(payload.get("managed", True)),
+    )
+
+
+def _pending_order_to_json(order: PendingOrder) -> dict[str, object]:
+    payload = asdict(order)
+    payload["submitted_at"] = order.submitted_at.astimezone(KST).isoformat()
+    return payload
+
+
+def _pending_order_from_json(payload: dict[str, object]) -> PendingOrder:
+    return PendingOrder(
+        order_no=str(payload["order_no"]),
+        market=str(payload["market"]),
+        side=str(payload["side"]),
+        symbol=str(payload["symbol"]),
+        name=str(payload["name"]),
+        quantity=float(payload["quantity"]),
+        requested_price=float(payload["requested_price"]),
+        submitted_at=datetime.fromisoformat(str(payload["submitted_at"])),
+        reason=str(payload.get("reason") or ""),
         exchange=str(payload["exchange"]) if payload.get("exchange") else None,
     )

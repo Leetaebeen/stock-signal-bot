@@ -121,3 +121,33 @@ def test_runtime_monitors_open_position_before_candidate_scan(tmp_path):
 
     assert results[0].symbol == "IONQ"
     assert runtime.executor.signals[0].price == 41.0
+
+
+def test_runtime_does_not_auto_sell_untracked_account_holding(tmp_path):
+    settings = FakeSettings()
+    settings.trading_state_path = str(tmp_path / "positions.json")
+    runtime = TradingRuntime(settings)
+    runtime.store.save(
+        {
+            "005930": Position(
+                symbol="005930",
+                name="삼성전자",
+                market="KR",
+                quantity=4,
+                entry_price=290000,
+                entry_at=datetime.now(KST),
+                highest_price=290000,
+                exchange="KRX",
+                managed=False,
+            )
+        }
+    )
+
+    class FailOnUse:
+        def __getattr__(self, name):
+            raise AssertionError(f"untracked holding must not call {name}")
+
+    runtime.client = FailOnUse()
+    runtime.executor = FailOnUse()
+
+    assert runtime._monitor_open_positions(["KR"]) == []

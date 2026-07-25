@@ -7,10 +7,10 @@
 ## 현재 기능
 
 - KIS 모의투자 토큰 발급
-- 모의투자 국내 잔고 조회
+- 모의투자 국내/미국 잔고 조회 및 로컬 상태 동기화
 - 국내/해외 현재가 조회
 - 국내/해외 1분봉 조회
-- 국내/해외 모의 주문 API 연결
+- 국내/해외 모의 주문 및 실제 체결 조회
 - 종목별 NASDAQ/NYSE 거래소 라우팅
 - 분봉 거래량, 1분·5분 상승률, 고점 돌파, VWAP 이격 기반 진입
 - 익절, 손절, 트레일링 스톱, 최대 보유시간 청산
@@ -79,16 +79,14 @@ python -m app.tools.kis_order_check US buy NVDA --qty 1 --price 160 --exchange N
 python -m app.tools.kis_order_check US buy NVDA --qty 1 --price 160 --exchange NAS --session after
 ```
 
-실제 모의 주문 테스트는 나중에 `ORDER_ENABLED=true`로 바꾸고 `--execute`를 붙여서 1주 단위로만 진행합니다.
-
-미국 주식 세션은 `regular`, `day`, `pre`, `after`를 지원합니다. 정규장 외 세션은 시장가 대신 지정가 주문만 허용합니다.
+실제 모의 주문 테스트는 `ORDER_ENABLED=true`와 `--execute`를 사용하며 1주 단위로 진행합니다. 미국 주식은 `regular`, `day`, `pre`, `after` 세션을 지원하고 정규장 외에는 지정가만 허용합니다.
 
 ## 텔레그램 알림 정책
 
 자동 실행 중 텔레그램은 거래 이벤트에만 사용합니다.
 
-- 모의 매수 주문 이벤트
-- 모의 매도 주문 이벤트
+- 모의 매수 체결
+- 모의 매도 체결
 - 주문 실패
 - 긴급 오류
 
@@ -101,4 +99,5 @@ python -m app.tools.kis_order_check US buy NVDA --qty 1 --price 160 --exchange N
 - `REAL_TRADING_ENABLED=true`면 중단합니다.
 - `ORDER_ENABLED=false`가 기본값입니다.
 - 실계좌 자동주문은 구현하지 않습니다.
-- 주문 접수와 실제 체결을 대조하는 계좌 동기화 기능은 다음 단계에서 보강합니다.
+- 주문 접수만으로 체결 처리하지 않으며 KIS 체결 내역 확인 후 포지션과 알림을 갱신합니다.
+- 로컬에 없던 계좌 보유 종목은 자동 매도하지 않는 관리 제외 상태로 반영합니다.

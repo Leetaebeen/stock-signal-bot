@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-from app.brokers.kis_client import OrderResult
+from app.brokers.kis_client import BrokerHolding, OrderFillStatus, OrderResult
 from app.trading.executor import ExecutionConfig, TradingExecutor
 from app.trading.state import JsonPositionStore
 from app.trading.strategy import KST, MarketSignal, StrategyRules
@@ -9,6 +9,8 @@ from app.trading.strategy import KST, MarketSignal, StrategyRules
 class FakeBroker:
     def __init__(self) -> None:
         self.orders = []
+        self.fill_state = "FILLED"
+        self.holdings = []
 
     def place_domestic_order(self, **kwargs):
         self.orders.append(kwargs)
@@ -38,6 +40,18 @@ class FakeBroker:
             raw={"rt_cd": "0"},
         )
 
+    def get_order_fill_status(self, **kwargs):
+        order = next(item for index, item in enumerate(self.orders, start=1) if f"order-{index}" == kwargs["order_no"])
+        return OrderFillStatus(
+            state=self.fill_state,
+            filled_quantity=float(order["quantity"]) if self.fill_state == "FILLED" else 0.0,
+            average_price=float(order["price"]) if self.fill_state == "FILLED" else 0.0,
+            raw={},
+        )
+
+    def get_holdings(self, market: str) -> list[BrokerHolding]:
+        return [item for item in self.holdings if item.market == market]
+
 
 class FakeAlerter:
     def __init__(self) -> None:
@@ -48,16 +62,25 @@ class FakeAlerter:
         return True
 
 
-def test_executor_buys_and_stores_position(tmp_path):
+def test_executor_stores_buy_as_pending_then_confirms_fill(tmp_path):
     broker = FakeBroker()
     alerter = FakeAlerter()
     executor = _executor(tmp_path, broker=broker, alerter=alerter)
 
-    result = executor.handle_signal(_strong_signal("HOOD", "Robinhood", "US"))
+    submitted = executor.handle_signal(_strong_signal("HOOD", "Robinhood", "US"))
 
-    assert result.action == "BUY"
+    assert submitted.action == "SUBMITTED"
     assert broker.orders[0]["side"] == "buy"
     assert broker.orders[0]["session"] == "regular"
+    assert executor.store.load() == {}
+    assert len(executor.store.load_pending_orders()) == 1
+    assert alerter.messages == []
+
+    result = executor.reconcile_pending_orders()[0]
+
+    assert result.action == "BUY"
+    assert executor.store.load()["HOOD"].entry_price == 113.0
+    assert executor.store.load_pending_orders() == []
     assert "[모의 매수 체결]" in alerter.messages[0]
 
 
@@ -66,8 +89,10 @@ def test_executor_buys_kr_signal_with_domestic_order(tmp_path):
     alerter = FakeAlerter()
     executor = _executor(tmp_path, broker=broker, alerter=alerter)
 
-    result = executor.handle_signal(_strong_signal("005930", "삼성전자", "KR", price=78000.0))
+    submitted = executor.handle_signal(_strong_signal("005930", "삼성전자", "KR", price=78000.0))
+    result = executor.reconcile_pending_orders()[0]
 
+    assert submitted.action == "SUBMITTED"
     assert result.action == "BUY"
     assert broker.orders[0]["symbol"] == "005930"
     assert broker.orders[0]["price"] == 78000
@@ -82,9 +107,9 @@ def test_executor_blocks_new_entry_when_max_open_positions_reached(tmp_path):
     first = executor.handle_signal(_strong_signal("HOOD", "Robinhood", "US", observed_at=observed_at))
     second = executor.handle_signal(_strong_signal("PLTR", "Palantir", "US", observed_at=observed_at))
 
-    assert first.action == "BUY"
+    assert first.action == "SUBMITTED"
     assert second.action == "HOLD"
-    assert "보유 종목" in second.reason
+    assert "매수대기" in second.reason
     assert len(broker.orders) == 1
 
 
@@ -95,15 +120,52 @@ def test_executor_sells_existing_position_on_take_profit(tmp_path):
     executor = _executor(tmp_path, broker=broker, alerter=alerter, store=store, rules=StrategyRules(take_profit_pct=5.0))
     entry_at = datetime(2026, 7, 6, 22, 30, 0, tzinfo=KST)
     executor.handle_signal(_strong_signal("HOOD", "Robinhood", "US", price=100.0, observed_at=entry_at))
+    executor.reconcile_pending_orders()
 
-    result = executor.handle_signal(
+    submitted = executor.handle_signal(
         MarketSignal("HOOD", "Robinhood", "US", 106.0, 8.0, 7.0, 5_500_000_000, entry_at + timedelta(minutes=5))
     )
+
+    assert submitted.action == "SUBMITTED"
+    assert "HOOD" in store.load()
+    result = executor.reconcile_pending_orders()[0]
 
     assert result.action == "SELL"
     assert broker.orders[-1]["side"] == "sell"
     assert store.load() == {}
     assert "[모의 매도 체결]" in alerter.messages[-1]
+
+
+def test_executor_does_not_duplicate_order_while_fill_is_pending(tmp_path):
+    broker = FakeBroker()
+    broker.fill_state = "PENDING"
+    executor = _executor(tmp_path, broker=broker)
+    signal = _strong_signal("HOOD", "Robinhood", "US")
+
+    first = executor.handle_signal(signal)
+    second = executor.handle_signal(signal)
+    reconciled = executor.reconcile_pending_orders()[0]
+
+    assert first.action == "SUBMITTED"
+    assert second.action == "PENDING"
+    assert reconciled.action == "PENDING"
+    assert len(broker.orders) == 1
+
+
+def test_executor_reconciles_broker_holding_into_local_state(tmp_path):
+    broker = FakeBroker()
+    broker.holdings = [
+        BrokerHolding("005930", "삼성전자", "KR", 2, 78000, 79000, "KRX")
+    ]
+    executor = _executor(tmp_path, broker=broker)
+
+    results = executor.reconcile_holdings("KR")
+
+    position = executor.store.load()["005930"]
+    assert results[0].action == "SYNCED"
+    assert position.quantity == 2
+    assert position.entry_price == 78000
+    assert position.managed is False
 
 
 def test_executor_notifies_order_failure(tmp_path):

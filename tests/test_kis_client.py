@@ -227,6 +227,163 @@ def test_get_domestic_balance_uses_paper_tr_id_and_summarizes(tmp_path):
     assert summary["profit_loss_pct"] == 25.0
 
 
+def test_get_domestic_fill_status_uses_order_history(tmp_path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth2/tokenP":
+            return httpx.Response(200, json={"access_token": "token", "token_type": "Bearer", "expires_in": 3600})
+        if request.url.path == "/uapi/domestic-stock/v1/trading/inquire-daily-ccld":
+            assert request.headers["tr_id"] == "VTTC0081R"
+            assert request.url.params["ODNO"] == "000001"
+            assert request.url.params["PDNO"] == "005930"
+            return httpx.Response(
+                200,
+                json={
+                    "rt_cd": "0",
+                    "output1": [
+                        {
+                            "odno": "1",
+                            "pdno": "005930",
+                            "ord_qty": "1",
+                            "tot_ccld_qty": "1",
+                            "avg_prvs": "78100",
+                            "rmn_qty": "0",
+                        }
+                    ],
+                },
+            )
+        return httpx.Response(404)
+
+    client = KisClient(
+        app_key="app-key",
+        app_secret="app-secret",
+        account_no="12345678",
+        account_product_code="01",
+        env="paper",
+        token_cache_path=str(tmp_path / "kis_token.json"),
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    status = client.get_order_fill_status(
+        market="KR",
+        order_no="000001",
+        symbol="005930",
+        quantity=1,
+        submitted_at=kis_client_module.datetime(2026, 7, 25, tzinfo=kis_client_module.KST),
+    )
+
+    assert status.state == "FILLED"
+    assert status.filled_quantity == 1
+    assert status.average_price == 78100
+
+
+def test_get_overseas_fill_status_matches_order_locally_in_paper_mode(tmp_path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth2/tokenP":
+            return httpx.Response(200, json={"access_token": "token", "token_type": "Bearer", "expires_in": 3600})
+        if request.url.path == "/uapi/overseas-stock/v1/trading/inquire-ccnl":
+            assert request.headers["tr_id"] == "VTTS3035R"
+            assert request.url.params["PDNO"] == ""
+            assert request.url.params["ODNO"] == ""
+            return httpx.Response(
+                200,
+                json={
+                    "rt_cd": "0",
+                    "output": [
+                        {
+                            "odno": "2",
+                            "pdno": "NVDA",
+                            "ft_ord_qty": "1",
+                            "ft_ccld_qty": "1",
+                            "ft_ccld_unpr3": "144.35",
+                            "nccs_qty": "0",
+                        }
+                    ],
+                },
+            )
+        return httpx.Response(404)
+
+    client = KisClient(
+        app_key="app-key",
+        app_secret="app-secret",
+        account_no="12345678",
+        account_product_code="01",
+        env="paper",
+        token_cache_path=str(tmp_path / "kis_token.json"),
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    status = client.get_order_fill_status(
+        market="US",
+        order_no="000002",
+        symbol="NVDA",
+        quantity=1,
+        submitted_at=kis_client_module.datetime(2026, 7, 25, tzinfo=kis_client_module.KST),
+    )
+
+    assert status.state == "FILLED"
+    assert status.average_price == 144.35
+
+
+def test_get_holdings_maps_domestic_and_overseas_balances(tmp_path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth2/tokenP":
+            return httpx.Response(200, json={"access_token": "token", "token_type": "Bearer", "expires_in": 3600})
+        if request.url.path == "/uapi/domestic-stock/v1/trading/inquire-balance":
+            return httpx.Response(
+                200,
+                json={
+                    "rt_cd": "0",
+                    "output1": [
+                        {
+                            "pdno": "005930",
+                            "prdt_name": "삼성전자",
+                            "hldg_qty": "2",
+                            "pchs_avg_pric": "78000",
+                            "prpr": "79000",
+                        }
+                    ],
+                },
+            )
+        if request.url.path == "/uapi/overseas-stock/v1/trading/inquire-balance":
+            assert request.headers["tr_id"] == "VTTS3012R"
+            assert request.url.params["OVRS_EXCG_CD"] == "NASD"
+            return httpx.Response(
+                200,
+                json={
+                    "rt_cd": "0",
+                    "output1": [
+                        {
+                            "ovrs_pdno": "NVDA",
+                            "ovrs_item_name": "NVIDIA",
+                            "ovrs_cblc_qty": "1",
+                            "pchs_avg_pric": "144.20",
+                            "now_pric2": "145.00",
+                            "ovrs_excg_cd": "NASD",
+                        }
+                    ],
+                },
+            )
+        return httpx.Response(404)
+
+    client = KisClient(
+        app_key="app-key",
+        app_secret="app-secret",
+        account_no="12345678",
+        account_product_code="01",
+        env="paper",
+        token_cache_path=str(tmp_path / "kis_token.json"),
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    domestic = client.get_holdings("KR")
+    overseas = client.get_holdings("US")
+
+    assert domestic[0].symbol == "005930"
+    assert domestic[0].quantity == 2
+    assert overseas[0].symbol == "NVDA"
+    assert overseas[0].exchange == "NAS"
+
+
 def test_kis_client_refreshes_token_once_when_server_reports_expired_token(tmp_path):
     token_requests = 0
     quote_authorizations = []

@@ -1,4 +1,5 @@
 import logging
+import time
 from datetime import datetime
 
 from app.alerts.telegram import TelegramAlerter
@@ -61,14 +62,18 @@ class TradingRuntime:
         )
         self._us_cursor = 0
         self._kr_cursor = 0
+        self._last_holdings_sync = 0.0
 
     def run_once(self) -> list[ExecutionResult]:
         candidates = []
         active = active_markets(self.session_policy, us_session=self.settings.us_order_session)
         logger.info("scan cycle active_markets=%s", ",".join(active) if active else "NONE")
+        results = self._sync_holdings_if_due()
+        results.extend(self.executor.reconcile_pending_orders())
         positions_at_cycle_start = set(self.store.load())
-        results = self._monitor_open_positions(active)
-        excluded_symbols = positions_at_cycle_start | set(self.store.load())
+        results.extend(self._monitor_open_positions(active))
+        pending_symbols = {item.symbol for item in self.store.load_pending_orders()}
+        excluded_symbols = positions_at_cycle_start | set(self.store.load()) | pending_symbols
         us_symbols = self._next_us_symbols() if "US" in active else []
         kr_symbols = self._next_kr_symbols() if "KR" in active else []
         if us_symbols:
@@ -100,9 +105,38 @@ class TradingRuntime:
             results.append(result)
         return results
 
+    def _sync_holdings_if_due(self) -> list[ExecutionResult]:
+        now = time.monotonic()
+        interval = max(getattr(self.settings, "account_sync_interval_seconds", 300), 30)
+        if self._last_holdings_sync and now - self._last_holdings_sync < interval:
+            return []
+
+        results: list[ExecutionResult] = []
+        successful_markets = 0
+        for market in ("KR", "US"):
+            try:
+                market_results = self.executor.reconcile_holdings(market)
+                results.extend(market_results)
+                successful_markets += 1
+                for result in market_results:
+                    logger.warning(
+                        "holding sync market=%s symbol=%s action=%s reason=%s",
+                        market,
+                        result.symbol,
+                        result.action,
+                        result.reason,
+                    )
+            except Exception as exc:
+                logger.warning("holding sync failed market=%s reason=%s", market, exc)
+        if successful_markets:
+            self._last_holdings_sync = now
+        return results
+
     def _monitor_open_positions(self, active_markets_now: list[str]) -> list[ExecutionResult]:
         results: list[ExecutionResult] = []
         for position in self.store.load().values():
+            if not position.managed:
+                continue
             if position.market.upper() not in active_markets_now:
                 continue
             try:

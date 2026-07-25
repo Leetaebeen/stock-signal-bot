@@ -1,12 +1,16 @@
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
 from app.alerts.telegram import TelegramAlerter
 from app.alerts.trade_messages import OrderFailure, TradeFill, build_order_failure_message, build_trade_fill_message
-from app.brokers.kis_client import OrderResult
-from app.trading.state import JsonPositionStore
+from app.brokers.kis_client import BrokerHolding, OrderFillStatus, OrderResult
+from app.trading.state import JsonPositionStore, PendingOrder
 from app.trading.strategy import KST, MarketSignal, Position, StrategyRules, evaluate_entry, evaluate_exit, open_position
+
+
+logger = logging.getLogger(__name__)
 
 
 class TradingBroker(Protocol):
@@ -38,6 +42,20 @@ class TradingBroker(Protocol):
         paper_trading_only: bool,
         real_trading_enabled: bool,
     ) -> OrderResult:
+        ...
+
+    def get_order_fill_status(
+        self,
+        *,
+        market: str,
+        order_no: str,
+        symbol: str,
+        quantity: float,
+        submitted_at: datetime,
+    ) -> OrderFillStatus:
+        ...
+
+    def get_holdings(self, market: str) -> list[BrokerHolding]:
         ...
 
 
@@ -80,6 +98,9 @@ class TradingExecutor:
         self.alerter = alerter
 
     def handle_signal(self, signal: MarketSignal) -> ExecutionResult:
+        pending = self.store.pending_for_symbol(signal.symbol)
+        if pending:
+            return ExecutionResult("PENDING", signal.symbol, f"주문 체결 대기: {pending.side}", pending.order_no)
         positions = self.store.load()
         position = positions.get(signal.symbol)
         if position:
@@ -90,11 +111,12 @@ class TradingExecutor:
         decision = evaluate_entry(signal, self.rules)
         if not decision.should_buy:
             return ExecutionResult("HOLD", signal.symbol, decision.reason)
-        if self.config.max_open_positions > 0 and len(positions) >= self.config.max_open_positions:
+        pending_buys = sum(1 for item in self.store.load_pending_orders() if item.side.lower() == "buy")
+        if self.config.max_open_positions > 0 and len(positions) + pending_buys >= self.config.max_open_positions:
             return ExecutionResult(
                 "HOLD",
                 signal.symbol,
-                f"최대 보유 종목 수 도달: {len(positions)}/{self.config.max_open_positions}",
+                f"최대 보유·매수대기 종목 수 도달: {len(positions) + pending_buys}/{self.config.max_open_positions}",
             )
 
         try:
@@ -108,23 +130,25 @@ class TradingExecutor:
             self._notify_failure(signal, "BUY", str(exc))
             return ExecutionResult("ERROR", signal.symbol, str(exc))
 
-        position = open_position(signal, quantity=self.config.quantity, entry_at=signal.observed_at or datetime.now(KST))
-        positions[signal.symbol] = position
-        self.store.save(positions)
-        self._notify_fill(
-            TradeFill(
+        if not order.order_no:
+            reason = "KIS 주문 응답에 주문번호가 없습니다."
+            self._notify_failure(signal, "BUY", reason)
+            return ExecutionResult("ERROR", signal.symbol, reason)
+        self.store.add_pending_order(
+            PendingOrder(
+                order_no=order.order_no,
+                market=signal.market,
+                side="buy",
                 symbol=signal.symbol,
                 name=signal.name,
-                market=signal.market,
-                side="BUY",
                 quantity=self.config.quantity,
-                price=signal.price,
-                currency=_currency_for_market(signal.market),
+                requested_price=signal.price,
+                submitted_at=signal.observed_at or datetime.now(KST),
                 reason=decision.reason,
-                filled_at=signal.observed_at,
+                exchange=signal.exchange,
             )
         )
-        return ExecutionResult("BUY", signal.symbol, decision.reason, order_no=order.order_no)
+        return ExecutionResult("SUBMITTED", signal.symbol, decision.reason, order_no=order.order_no)
 
     def _handle_existing_position(
         self,
@@ -150,25 +174,169 @@ class TradingExecutor:
             self._notify_failure(signal, "SELL", str(exc))
             return ExecutionResult("ERROR", signal.symbol, str(exc))
 
-        positions.pop(signal.symbol, None)
+        if not order.order_no:
+            reason = "KIS 주문 응답에 주문번호가 없습니다."
+            self._notify_failure(signal, "SELL", reason)
+            return ExecutionResult("ERROR", signal.symbol, reason)
+        positions[signal.symbol] = updated
         self.store.save(positions)
-        holding_seconds = int(((signal.observed_at or datetime.now(KST)) - updated.entry_at).total_seconds())
-        self._notify_fill(
-            TradeFill(
+        self.store.add_pending_order(
+            PendingOrder(
+                order_no=order.order_no,
+                market=signal.market,
+                side="sell",
                 symbol=signal.symbol,
                 name=signal.name,
-                market=signal.market,
-                side="SELL",
                 quantity=updated.quantity,
-                price=signal.price,
-                entry_price=updated.entry_price,
-                currency=_currency_for_market(signal.market),
+                requested_price=signal.price,
+                submitted_at=signal.observed_at or datetime.now(KST),
                 reason=decision.reason,
-                holding_seconds=holding_seconds,
-                filled_at=signal.observed_at,
+                exchange=signal.exchange or updated.exchange,
             )
         )
-        return ExecutionResult("SELL", signal.symbol, decision.reason, order_no=order.order_no)
+        return ExecutionResult("SUBMITTED", signal.symbol, decision.reason, order_no=order.order_no)
+
+    def reconcile_pending_orders(self) -> list[ExecutionResult]:
+        results: list[ExecutionResult] = []
+        for pending in self.store.load_pending_orders():
+            try:
+                status = self.broker.get_order_fill_status(
+                    market=pending.market,
+                    order_no=pending.order_no,
+                    symbol=pending.symbol,
+                    quantity=pending.quantity,
+                    submitted_at=pending.submitted_at,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "fill inquiry failed order_no=%s symbol=%s reason=%s",
+                    pending.order_no,
+                    pending.symbol,
+                    exc,
+                )
+                results.append(ExecutionResult("PENDING", pending.symbol, str(exc), pending.order_no))
+                continue
+
+            if status.state == "FILLED":
+                results.append(self._apply_confirmed_fill(pending, status))
+            elif status.state in {"CANCELED", "REJECTED"}:
+                self.store.remove_pending_order(pending.order_no)
+                reason = f"주문 {status.state.lower()}"
+                self._notify_failure(_pending_to_signal(pending), pending.side.upper(), reason)
+                results.append(ExecutionResult(status.state, pending.symbol, reason, pending.order_no))
+            else:
+                results.append(
+                    ExecutionResult(status.state, pending.symbol, "체결 확인 대기", pending.order_no)
+                )
+        return results
+
+    def reconcile_holdings(self, market: str) -> list[ExecutionResult]:
+        holdings = self.broker.get_holdings(market)
+        account = {item.symbol: item for item in holdings}
+        positions = self.store.load()
+        pending_symbols = {item.symbol for item in self.store.load_pending_orders()}
+        results: list[ExecutionResult] = []
+
+        for symbol, holding in account.items():
+            if symbol in pending_symbols:
+                continue
+            existing = positions.get(symbol)
+            entry_price = holding.average_price or holding.current_price
+            if entry_price <= 0:
+                logger.warning("holding sync skipped zero price market=%s symbol=%s", market, symbol)
+                continue
+            if existing:
+                positions[symbol] = Position(
+                    symbol=symbol,
+                    name=holding.name or existing.name,
+                    market=holding.market,
+                    quantity=holding.quantity,
+                    entry_price=entry_price,
+                    entry_at=existing.entry_at,
+                    highest_price=max(existing.highest_price, holding.current_price, entry_price),
+                    exchange=holding.exchange or existing.exchange,
+                    managed=existing.managed,
+                )
+                continue
+            positions[symbol] = Position(
+                symbol=symbol,
+                name=holding.name,
+                market=holding.market,
+                quantity=holding.quantity,
+                entry_price=entry_price,
+                entry_at=datetime.now(KST),
+                highest_price=max(holding.current_price, entry_price),
+                exchange=holding.exchange,
+                managed=False,
+            )
+            results.append(ExecutionResult("SYNCED", symbol, "미추적 계좌 보유 종목을 관리 제외로 반영"))
+
+        normalized_market = market.strip().upper()
+        for symbol, position in list(positions.items()):
+            if position.market.upper() != normalized_market or symbol in pending_symbols:
+                continue
+            if symbol not in account:
+                positions.pop(symbol)
+                results.append(ExecutionResult("REMOVED", symbol, "계좌에 없는 로컬 포지션 제거"))
+
+        self.store.save(positions)
+        return results
+
+    def _apply_confirmed_fill(
+        self,
+        pending: PendingOrder,
+        status: OrderFillStatus,
+    ) -> ExecutionResult:
+        fill_price = status.average_price or pending.requested_price
+        fill_quantity = status.filled_quantity or pending.quantity
+        filled_at = datetime.now(KST)
+        positions = self.store.load()
+        remaining_orders = [
+            item for item in self.store.load_pending_orders() if item.order_no != pending.order_no
+        ]
+
+        if pending.side.lower() == "buy":
+            signal = _pending_to_signal(pending, price=fill_price, observed_at=filled_at)
+            positions[pending.symbol] = open_position(signal, quantity=fill_quantity, entry_at=filled_at)
+            self.store.save_state(positions, remaining_orders)
+            self._notify_fill(
+                TradeFill(
+                    symbol=pending.symbol,
+                    name=pending.name,
+                    market=pending.market,
+                    side="BUY",
+                    quantity=fill_quantity,
+                    price=fill_price,
+                    currency=_currency_for_market(pending.market),
+                    reason=pending.reason,
+                    filled_at=filled_at,
+                )
+            )
+            action = "BUY"
+        else:
+            position = positions.pop(pending.symbol, None)
+            self.store.save_state(positions, remaining_orders)
+            holding_seconds = (
+                int((filled_at - position.entry_at).total_seconds()) if position is not None else None
+            )
+            self._notify_fill(
+                TradeFill(
+                    symbol=pending.symbol,
+                    name=pending.name,
+                    market=pending.market,
+                    side="SELL",
+                    quantity=fill_quantity,
+                    price=fill_price,
+                    entry_price=position.entry_price if position else None,
+                    currency=_currency_for_market(pending.market),
+                    reason=pending.reason,
+                    holding_seconds=holding_seconds,
+                    filled_at=filled_at,
+                )
+            )
+            action = "SELL"
+
+        return ExecutionResult(action, pending.symbol, pending.reason, pending.order_no)
 
     def _place_order(self, *, side: str, signal: MarketSignal, quantity: int, price: float) -> OrderResult:
         if signal.market.upper() == "KR":
@@ -217,3 +385,22 @@ class TradingExecutor:
 
 def _currency_for_market(market: str) -> str:
     return "KRW" if market.upper() == "KR" else "USD"
+
+
+def _pending_to_signal(
+    pending: PendingOrder,
+    *,
+    price: float | None = None,
+    observed_at: datetime | None = None,
+) -> MarketSignal:
+    return MarketSignal(
+        symbol=pending.symbol,
+        name=pending.name,
+        market=pending.market,
+        price=price or pending.requested_price,
+        change_pct=0.0,
+        volume_ratio=0.0,
+        trading_value_krw=0.0,
+        observed_at=observed_at or pending.submitted_at,
+        exchange=pending.exchange,
+    )

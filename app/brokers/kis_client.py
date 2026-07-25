@@ -64,6 +64,25 @@ class OrderResult:
     raw: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class OrderFillStatus:
+    state: str
+    filled_quantity: float
+    average_price: float
+    raw: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class BrokerHolding:
+    symbol: str
+    name: str
+    market: str
+    quantity: float
+    average_price: float
+    current_price: float
+    exchange: str | None = None
+
+
 class KisClient:
     def __init__(
         self,
@@ -121,6 +140,116 @@ class KisClient:
             },
         )
         return _checked_payload(response, "KIS domestic balance request failed")
+
+    def get_overseas_balance_raw(self) -> dict[str, Any]:
+        self._require_account()
+        response = self._get_with_auth_retry(
+            "/uapi/overseas-stock/v1/trading/inquire-balance",
+            tr_id="VTTS3012R" if self.env == "paper" else "TTTS3012R",
+            params={
+                "CANO": self.account_no,
+                "ACNT_PRDT_CD": self.account_product_code,
+                "OVRS_EXCG_CD": "NASD",
+                "TR_CRCY_CD": "USD",
+                "CTX_AREA_FK200": "",
+                "CTX_AREA_NK200": "",
+            },
+        )
+        return _checked_payload(response, "KIS overseas balance request failed")
+
+    def get_holdings(self, market: str) -> list[BrokerHolding]:
+        normalized_market = market.strip().upper()
+        if normalized_market == "KR":
+            payload = self.get_domestic_balance_raw()
+            return [
+                _domestic_output_to_holding(item)
+                for item in _dict_list(payload.get("output1"))
+                if _to_float(item.get("hldg_qty")) > 0
+            ]
+        if normalized_market == "US":
+            payload = self.get_overseas_balance_raw()
+            return [
+                _overseas_output_to_holding(item)
+                for item in _dict_list(payload.get("output1"))
+                if _to_float(item.get("ovrs_cblc_qty")) > 0
+            ]
+        raise ValueError("market must be KR or US.")
+
+    def get_order_fill_status(
+        self,
+        *,
+        market: str,
+        order_no: str,
+        symbol: str,
+        quantity: float,
+        submitted_at: datetime,
+    ) -> OrderFillStatus:
+        normalized_market = market.strip().upper()
+        if normalized_market == "KR":
+            rows = self._get_domestic_order_rows(order_no, symbol, submitted_at)
+            return _domestic_row_to_fill_status(_find_order_row(rows, order_no, symbol), quantity)
+        if normalized_market == "US":
+            rows = self._get_overseas_order_rows(submitted_at)
+            return _overseas_row_to_fill_status(_find_order_row(rows, order_no, symbol), quantity)
+        raise ValueError("market must be KR or US.")
+
+    def _get_domestic_order_rows(
+        self,
+        order_no: str,
+        symbol: str,
+        submitted_at: datetime,
+    ) -> list[dict[str, Any]]:
+        self._require_account()
+        order_date = _as_kst(submitted_at).strftime("%Y%m%d")
+        response = self._get_with_auth_retry(
+            "/uapi/domestic-stock/v1/trading/inquire-daily-ccld",
+            tr_id="VTTC0081R" if self.env == "paper" else "TTTC0081R",
+            params={
+                "CANO": self.account_no,
+                "ACNT_PRDT_CD": self.account_product_code,
+                "INQR_STRT_DT": order_date,
+                "INQR_END_DT": order_date,
+                "SLL_BUY_DVSN_CD": "00",
+                "PDNO": symbol,
+                "CCLD_DVSN": "00",
+                "INQR_DVSN": "00",
+                "INQR_DVSN_3": "00",
+                "ORD_GNO_BRNO": "",
+                "ODNO": order_no,
+                "INQR_DVSN_1": "",
+                "CTX_AREA_FK100": "",
+                "CTX_AREA_NK100": "",
+                "EXCG_ID_DVSN_CD": "ALL",
+            },
+        )
+        payload = _checked_payload(response, "KIS domestic fill inquiry failed")
+        return _dict_list(payload.get("output1"))
+
+    def _get_overseas_order_rows(self, submitted_at: datetime) -> list[dict[str, Any]]:
+        self._require_account()
+        order_date = _as_kst(submitted_at).strftime("%Y%m%d")
+        response = self._get_with_auth_retry(
+            "/uapi/overseas-stock/v1/trading/inquire-ccnl",
+            tr_id="VTTS3035R" if self.env == "paper" else "TTTS3035R",
+            params={
+                "CANO": self.account_no,
+                "ACNT_PRDT_CD": self.account_product_code,
+                "PDNO": "" if self.env == "paper" else "%",
+                "ORD_STRT_DT": order_date,
+                "ORD_END_DT": order_date,
+                "SLL_BUY_DVSN": "00",
+                "CCLD_NCCS_DVSN": "00",
+                "OVRS_EXCG_CD": "" if self.env == "paper" else "NASD",
+                "SORT_SQN": "DS",
+                "ORD_DT": "",
+                "ORD_GNO_BRNO": "",
+                "ODNO": "",
+                "CTX_AREA_NK200": "",
+                "CTX_AREA_FK200": "",
+            },
+        )
+        payload = _checked_payload(response, "KIS overseas fill inquiry failed")
+        return _dict_list(payload.get("output"))
 
     def get_domestic_price(self, symbol: str, name: str | None = None) -> PriceSnapshot:
         response = self._get_with_auth_retry(
@@ -364,6 +493,10 @@ class KisClient:
             real_trading_enabled=real_trading_enabled,
         )
 
+    def _require_account(self) -> None:
+        if not self.account_no or not self.account_product_code:
+            raise ValueError("KIS_ACCOUNT_NO and KIS_ACCOUNT_PRODUCT_CODE are required.")
+
     def _build_domestic_order_payload(
         self,
         *,
@@ -423,6 +556,109 @@ def summarize_domestic_balance(payload: dict[str, Any]) -> dict[str, Any]:
         "profit_loss_krw": _to_float(summary.get("evlu_pfls_smtl_amt")),
         "profit_loss_pct": _to_float(summary.get("evlu_pfls_rt")),
     }
+
+
+def _domestic_row_to_fill_status(row: dict[str, Any], expected_quantity: float) -> OrderFillStatus:
+    if not row:
+        return OrderFillStatus("UNKNOWN", 0.0, 0.0, {})
+    ordered = _to_float(row.get("ord_qty")) or expected_quantity
+    filled = _to_float(row.get("tot_ccld_qty"))
+    average_price = _to_float(row.get("avg_prvs"))
+    canceled = str(row.get("cncl_yn") or "").strip().upper() == "Y"
+    rejected = _to_float(row.get("rjct_qty")) > 0
+    return OrderFillStatus(
+        state=_fill_state(ordered, filled, canceled=canceled, rejected=rejected),
+        filled_quantity=filled,
+        average_price=average_price,
+        raw=row,
+    )
+
+
+def _overseas_row_to_fill_status(row: dict[str, Any], expected_quantity: float) -> OrderFillStatus:
+    if not row:
+        return OrderFillStatus("UNKNOWN", 0.0, 0.0, {})
+    ordered = _to_float(row.get("ft_ord_qty")) or expected_quantity
+    filled = _to_float(row.get("ft_ccld_qty"))
+    average_price = _to_float(row.get("ft_ccld_unpr3"))
+    canceled = _to_float(row.get("nccs_qty")) <= 0 and filled < ordered
+    rejected = str(row.get("rjct_rson") or row.get("rjct_rson_name") or "").strip() != ""
+    return OrderFillStatus(
+        state=_fill_state(ordered, filled, canceled=canceled, rejected=rejected),
+        filled_quantity=filled,
+        average_price=average_price,
+        raw=row,
+    )
+
+
+def _fill_state(ordered: float, filled: float, *, canceled: bool, rejected: bool) -> str:
+    if ordered > 0 and filled >= ordered:
+        return "FILLED"
+    if filled > 0:
+        return "PARTIAL"
+    if rejected:
+        return "REJECTED"
+    if canceled:
+        return "CANCELED"
+    return "PENDING"
+
+
+def _find_order_row(rows: list[dict[str, Any]], order_no: str, symbol: str) -> dict[str, Any]:
+    normalized_symbol = symbol.strip().upper()
+    for row in rows:
+        row_order_no = str(row.get("odno") or row.get("ODNO") or "")
+        row_symbol = str(row.get("pdno") or row.get("ovrs_pdno") or "").strip().upper()
+        if _same_order_no(row_order_no, order_no) and (not row_symbol or row_symbol == normalized_symbol):
+            return row
+    return {}
+
+
+def _same_order_no(left: str, right: str) -> bool:
+    return left.strip().lstrip("0") == right.strip().lstrip("0")
+
+
+def _domestic_output_to_holding(output: dict[str, Any]) -> BrokerHolding:
+    symbol = str(output.get("pdno") or "").strip()
+    return BrokerHolding(
+        symbol=symbol,
+        name=str(output.get("prdt_name") or symbol),
+        market="KR",
+        quantity=_to_float(output.get("hldg_qty")),
+        average_price=_to_float(output.get("pchs_avg_pric")),
+        current_price=_to_float(output.get("prpr")),
+        exchange="KRX",
+    )
+
+
+def _overseas_output_to_holding(output: dict[str, Any]) -> BrokerHolding:
+    symbol = str(output.get("ovrs_pdno") or output.get("pdno") or "").strip().upper()
+    return BrokerHolding(
+        symbol=symbol,
+        name=str(output.get("ovrs_item_name") or output.get("prdt_name") or symbol),
+        market="US",
+        quantity=_to_float(output.get("ovrs_cblc_qty")),
+        average_price=_to_float(output.get("pchs_avg_pric")),
+        current_price=_to_float(output.get("now_pric2")),
+        exchange=_quote_exchange_code(str(output.get("ovrs_excg_cd") or "NASD")),
+    )
+
+
+def _quote_exchange_code(value: str) -> str:
+    normalized = value.strip().upper()
+    return {
+        "NASD": "NAS",
+        "NAS": "NAS",
+        "NASDAQ": "NAS",
+        "NYSE": "NYS",
+        "NYS": "NYS",
+        "AMEX": "AMS",
+        "AMS": "AMS",
+    }.get(normalized, "NAS")
+
+
+def _as_kst(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=KST)
+    return value.astimezone(KST)
 
 
 def _order_payload_to_result(
@@ -647,6 +883,14 @@ def _first_dict(value: Any) -> dict[str, Any]:
     if isinstance(value, list) and value and isinstance(value[0], dict):
         return value[0]
     return {}
+
+
+def _dict_list(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    if isinstance(value, dict):
+        return [value]
+    return []
 
 
 def _to_float(value: Any) -> float:

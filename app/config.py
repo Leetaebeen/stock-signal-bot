@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     real_trading_enabled: bool = False
 
     trading_state_path: str = "data/paper_positions.json"
+    account_sync_interval_seconds: int = 300
     trading_default_quantity: int = 1
     trading_max_open_positions: int = 1
     entry_min_change_pct: float = 3.0

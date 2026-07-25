@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-from app.trading.state import JsonPositionStore
+from app.trading.state import JsonPositionStore, PendingOrder
 from app.trading.strategy import KST, MarketSignal, StrategyRules, evaluate_entry, evaluate_exit, open_position
 
 
@@ -158,3 +158,27 @@ def test_position_store_round_trips(tmp_path):
     assert loaded["005930"].exchange == "KRX"
     assert removed is not None
     assert store.load() == {}
+
+
+def test_position_store_preserves_pending_orders_when_positions_change(tmp_path):
+    submitted_at = datetime(2026, 7, 25, 10, 0, 0, tzinfo=KST)
+    store = JsonPositionStore(tmp_path / "positions.json")
+    order = PendingOrder(
+        order_no="000001",
+        market="KR",
+        side="buy",
+        symbol="005930",
+        name="삼성전자",
+        quantity=1,
+        requested_price=78000,
+        submitted_at=submitted_at,
+        reason="test",
+        exchange="KRX",
+    )
+
+    store.add_pending_order(order)
+    store.save({})
+
+    assert store.load_pending_orders() == [order]
+    assert store.remove_pending_order("000001") == order
+    assert store.load_pending_orders() == []
