@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     trading_default_quantity: int = 1
     trading_max_open_positions: int = 1
     buying_power_check_enabled: bool = True
+    max_entries_per_market_24h: int = 3
+    kr_max_realized_loss_24h_krw: float = 100_000
+    us_max_realized_loss_24h_usd: float = 100
+    symbol_reentry_cooldown_seconds: int = 600
     entry_min_change_pct: float = 3.0
     entry_max_change_pct: float = 30.0
     entry_min_volume_ratio: float = 4.0

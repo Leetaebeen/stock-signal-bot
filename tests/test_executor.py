@@ -8,7 +8,7 @@ from app.brokers.kis_client import (
     OrderResult,
 )
 from app.trading.executor import ExecutionConfig, TradingExecutor
-from app.trading.journal import TradeJournal
+from app.trading.journal import FillRecord, TradeJournal
 from app.trading.state import JsonPositionStore
 from app.trading.strategy import KST, MarketSignal, Position, StrategyRules
 
@@ -178,6 +178,100 @@ def test_executor_fails_closed_when_buying_power_query_fails(tmp_path):
 
     assert result.action == "HOLD"
     assert "주문 가능 금액 조회 실패" in result.reason
+    assert broker.orders == []
+
+
+def test_executor_blocks_entry_at_market_24h_entry_limit(tmp_path):
+    broker = FakeBroker()
+    journal = TradeJournal(tmp_path / "trades.db")
+    now = datetime.now(KST)
+    for index in range(3):
+        journal.record_fill(
+            FillRecord(
+                order_no=f"buy-{index}",
+                symbol=f"US{index}",
+                name=f"US {index}",
+                market="US",
+                side="BUY",
+                quantity=1,
+                price=100,
+                currency="USD",
+                reason="entry",
+                filled_at=now - timedelta(hours=index + 1),
+            )
+        )
+    executor = _executor(tmp_path, broker=broker, journal=journal)
+
+    result = executor.handle_signal(
+        _strong_signal("NVDA", "NVIDIA", "US", observed_at=now)
+    )
+
+    assert result.action == "HOLD"
+    assert "최근 24시간 매수 한도 도달" in result.reason
+    assert broker.orders == []
+
+
+def test_executor_applies_realized_loss_limit_per_market(tmp_path):
+    broker = FakeBroker()
+    journal = TradeJournal(tmp_path / "trades.db")
+    now = datetime.now(KST)
+    journal.record_fill(
+        FillRecord(
+            order_no="us-loss",
+            symbol="AMD",
+            name="AMD",
+            market="US",
+            side="SELL",
+            quantity=1,
+            price=50,
+            entry_price=200,
+            currency="USD",
+            reason="stop",
+            filled_at=now - timedelta(hours=1),
+        )
+    )
+    executor = _executor(tmp_path, broker=broker, journal=journal)
+
+    us_result = executor.handle_signal(
+        _strong_signal("NVDA", "NVIDIA", "US", observed_at=now)
+    )
+    kr_result = executor.handle_signal(
+        _strong_signal("000660", "SK Hynix", "KR", price=200000, observed_at=now)
+    )
+
+    assert us_result.action == "HOLD"
+    assert "US 최근 24시간 손실 한도 도달" in us_result.reason
+    assert kr_result.action == "SUBMITTED"
+    assert broker.orders[-1]["symbol"] == "000660"
+
+
+def test_executor_blocks_same_symbol_during_reentry_cooldown(tmp_path):
+    broker = FakeBroker()
+    journal = TradeJournal(tmp_path / "trades.db")
+    now = datetime.now(KST)
+    journal.record_fill(
+        FillRecord(
+            order_no="recent-sell",
+            symbol="NVDA",
+            name="NVIDIA",
+            market="US",
+            side="SELL",
+            quantity=1,
+            price=105,
+            entry_price=100,
+            currency="USD",
+            reason="exit",
+            filled_at=now - timedelta(minutes=5),
+        )
+    )
+    executor = _executor(tmp_path, broker=broker, journal=journal)
+
+    result = executor.handle_signal(
+        _strong_signal("NVDA", "NVIDIA", "US", observed_at=now)
+    )
+
+    assert result.action == "HOLD"
+    assert "매도 후 재진입 대기" in result.reason
     assert broker.orders == []
 
 

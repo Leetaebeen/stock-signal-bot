@@ -118,6 +118,10 @@ class ExecutionConfig:
     order_timeout_seconds: int = 120
     cancel_max_attempts: int = 3
     buying_power_check_enabled: bool = True
+    max_entries_per_market_24h: int = 3
+    kr_max_realized_loss_24h_krw: float = 100_000
+    us_max_realized_loss_24h_usd: float = 100
+    symbol_reentry_cooldown_seconds: int = 600
 
 
 @dataclass(frozen=True)
@@ -167,6 +171,10 @@ class TradingExecutor:
                 signal.symbol,
                 f"최대 보유·매수대기 종목 수 도달: {len(positions) + pending_buys}/{self.config.max_open_positions}",
             )
+
+        risk_reason = self._entry_risk_reason(signal)
+        if risk_reason:
+            return ExecutionResult("HOLD", signal.symbol, risk_reason)
 
         if self.config.buying_power_check_enabled:
             try:
@@ -222,6 +230,51 @@ class TradingExecutor:
             )
         )
         return ExecutionResult("SUBMITTED", signal.symbol, decision.reason, order_no=order.order_no)
+
+    def _entry_risk_reason(self, signal: MarketSignal) -> str | None:
+        if not self.journal:
+            return None
+        now = signal.observed_at or datetime.now(KST)
+        try:
+            snapshot = self.journal.risk_snapshot(
+                market=signal.market,
+                symbol=signal.symbol,
+                now=now,
+            )
+        except Exception as exc:
+            logger.warning("entry risk check failed symbol=%s reason=%s", signal.symbol, exc)
+            return f"최근 거래 위험 조회 실패: {exc}"
+
+        if (
+            self.config.max_entries_per_market_24h > 0
+            and snapshot.buy_fills >= self.config.max_entries_per_market_24h
+        ):
+            return (
+                f"{signal.market.upper()} 최근 24시간 매수 한도 도달: "
+                f"{snapshot.buy_fills}/{self.config.max_entries_per_market_24h}"
+            )
+
+        loss_limit = (
+            self.config.kr_max_realized_loss_24h_krw
+            if signal.market.upper() == "KR"
+            else self.config.us_max_realized_loss_24h_usd
+        )
+        if loss_limit > 0 and snapshot.realized_pnl <= -loss_limit:
+            currency = "원" if signal.market.upper() == "KR" else "USD"
+            return (
+                f"{signal.market.upper()} 최근 24시간 손실 한도 도달: "
+                f"{snapshot.realized_pnl:,.2f}{currency}"
+            )
+
+        if (
+            self.config.symbol_reentry_cooldown_seconds > 0
+            and snapshot.last_symbol_sell_at is not None
+        ):
+            elapsed = (now.astimezone(KST) - snapshot.last_symbol_sell_at.astimezone(KST)).total_seconds()
+            if elapsed < self.config.symbol_reentry_cooldown_seconds:
+                remaining = max(int(self.config.symbol_reentry_cooldown_seconds - elapsed), 1)
+                return f"{signal.symbol} 매도 후 재진입 대기: {remaining}초 남음"
+        return None
 
     def _handle_existing_position(
         self,

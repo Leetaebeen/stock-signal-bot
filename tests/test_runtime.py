@@ -44,6 +44,10 @@ class FakeSettings:
     trading_default_quantity = 1
     trading_max_open_positions = 1
     buying_power_check_enabled = True
+    max_entries_per_market_24h = 3
+    kr_max_realized_loss_24h_krw = 100_000
+    us_max_realized_loss_24h_usd = 100
+    symbol_reentry_cooldown_seconds = 600
     order_enabled = False
     paper_trading_only = True
     real_trading_enabled = False

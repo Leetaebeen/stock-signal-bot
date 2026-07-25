@@ -44,6 +44,75 @@ def test_trade_journal_records_unique_fills_and_summarizes_sell_results(tmp_path
     assert summary["average_pnl_pct"] == 5
 
 
+def test_trade_journal_builds_market_risk_snapshot_for_recent_24_hours(tmp_path):
+    journal = TradeJournal(tmp_path / "trades.db")
+    now = datetime(2026, 7, 25, 23, 0, tzinfo=KST)
+    fills = [
+        FillRecord(
+            order_no="recent-us-buy",
+            symbol="NVDA",
+            name="NVIDIA",
+            market="US",
+            side="BUY",
+            quantity=1,
+            price=100,
+            currency="USD",
+            reason="entry",
+            filled_at=now - timedelta(hours=2),
+        ),
+        FillRecord(
+            order_no="recent-us-sell",
+            symbol="NVDA",
+            name="NVIDIA",
+            market="US",
+            side="SELL",
+            quantity=1,
+            price=80,
+            entry_price=100,
+            currency="USD",
+            reason="stop",
+            filled_at=now - timedelta(minutes=30),
+        ),
+        FillRecord(
+            order_no="old-us-buy",
+            symbol="NVDA",
+            name="NVIDIA",
+            market="US",
+            side="BUY",
+            quantity=1,
+            price=90,
+            currency="USD",
+            reason="old",
+            filled_at=now - timedelta(hours=25),
+        ),
+        FillRecord(
+            order_no="recent-kr-buy",
+            symbol="005930",
+            name="Samsung Electronics",
+            market="KR",
+            side="BUY",
+            quantity=1,
+            price=80000,
+            currency="KRW",
+            reason="entry",
+            filled_at=now - timedelta(hours=1),
+        ),
+    ]
+    for fill in fills:
+        assert journal.record_fill(fill)
+
+    snapshot = journal.risk_snapshot(
+        market="US",
+        symbol="NVDA",
+        now=now,
+    )
+
+    assert snapshot.market == "US"
+    assert snapshot.buy_fills == 1
+    assert snapshot.realized_pnl == -20
+    assert snapshot.last_symbol_sell_at == now - timedelta(minutes=30)
+
+
 def test_trade_journal_labels_signal_only_inside_target_window(tmp_path):
     journal = TradeJournal(tmp_path / "trades.db")
     observed_at = datetime(2026, 7, 25, 22, 30, tzinfo=KST)

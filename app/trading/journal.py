@@ -1,6 +1,6 @@
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from app.trading.strategy import KST
@@ -31,6 +31,15 @@ class FillRecord:
         if self.side.upper() != "SELL" or not self.entry_price:
             return None
         return ((self.price - self.entry_price) / self.entry_price) * 100
+
+
+@dataclass(frozen=True)
+class RiskSnapshot:
+    market: str
+    lookback_hours: int
+    buy_fills: int
+    realized_pnl: float
+    last_symbol_sell_at: datetime | None
 
 
 @dataclass(frozen=True)
@@ -129,6 +138,48 @@ class TradeJournal:
             }
             for row in rows
         }
+
+    def risk_snapshot(
+        self,
+        *,
+        market: str,
+        symbol: str,
+        now: datetime,
+        lookback_hours: int = 24,
+    ) -> RiskSnapshot:
+        normalized_market = market.strip().upper()
+        normalized_symbol = symbol.strip().upper()
+        hours = max(int(lookback_hours), 1)
+        since = now.astimezone(KST) - timedelta(hours=hours)
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    SUM(CASE WHEN side = 'BUY' THEN 1 ELSE 0 END) AS buy_fills,
+                    COALESCE(SUM(CASE WHEN side = 'SELL' THEN pnl ELSE 0 END), 0) AS realized_pnl,
+                    MAX(
+                        CASE
+                            WHEN side = 'SELL' AND symbol = ? THEN filled_at
+                            ELSE NULL
+                        END
+                    ) AS last_symbol_sell_at
+                FROM trade_fills
+                WHERE market = ? AND filled_at >= ?
+                """,
+                (normalized_symbol, normalized_market, since.isoformat()),
+            ).fetchone()
+        last_sell = (
+            datetime.fromisoformat(str(row["last_symbol_sell_at"]))
+            if row and row["last_symbol_sell_at"]
+            else None
+        )
+        return RiskSnapshot(
+            market=normalized_market,
+            lookback_hours=hours,
+            buy_fills=int(row["buy_fills"] or 0) if row else 0,
+            realized_pnl=float(row["realized_pnl"] or 0) if row else 0.0,
+            last_symbol_sell_at=last_sell,
+        )
 
     def record_signal(self, signal: SignalRecord) -> int:
         observed_at = signal.observed_at.astimezone(KST)

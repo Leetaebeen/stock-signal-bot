@@ -60,6 +60,10 @@ class TradingRuntime:
                 order_timeout_seconds=settings.order_timeout_seconds,
                 cancel_max_attempts=settings.order_cancel_max_attempts,
                 buying_power_check_enabled=settings.buying_power_check_enabled,
+                max_entries_per_market_24h=settings.max_entries_per_market_24h,
+                kr_max_realized_loss_24h_krw=settings.kr_max_realized_loss_24h_krw,
+                us_max_realized_loss_24h_usd=settings.us_max_realized_loss_24h_usd,
+                symbol_reentry_cooldown_seconds=settings.symbol_reentry_cooldown_seconds,
             ),
             alerter=TelegramAlerter(
                 enabled=settings.telegram_enabled,

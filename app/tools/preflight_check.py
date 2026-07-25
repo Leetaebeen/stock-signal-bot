@@ -59,6 +59,16 @@ def _check_config(settings: Settings) -> list[CheckResult]:
             str(settings.buying_power_check_enabled),
         ),
         CheckResult(
+            "market_risk_limits",
+            "OK",
+            (
+                f"entries_24h={settings.max_entries_per_market_24h} "
+                f"kr_loss_24h={settings.kr_max_realized_loss_24h_krw:,.0f}KRW "
+                f"us_loss_24h={settings.us_max_realized_loss_24h_usd:,.2f}USD "
+                f"symbol_cooldown={settings.symbol_reentry_cooldown_seconds}s"
+            ),
+        ),
+        CheckResult(
             "telegram",
             "OK" if settings.telegram_enabled and settings.telegram_bot_token and settings.telegram_chat_id else "WARN",
             f"enabled={settings.telegram_enabled} chat_id={_mask(settings.telegram_chat_id)}",
