@@ -29,7 +29,11 @@ class Settings(BaseSettings):
     real_trading_enabled: bool = False
 
     trading_state_path: str = "data/paper_positions.json"
+    trade_journal_path: str = "data/trades.db"
     account_sync_interval_seconds: int = 300
+    order_auto_cancel_enabled: bool = True
+    order_timeout_seconds: int = 120
+    order_cancel_max_attempts: int = 3
     trading_default_quantity: int = 1
     trading_max_open_positions: int = 1
     entry_min_change_pct: float = 3.0

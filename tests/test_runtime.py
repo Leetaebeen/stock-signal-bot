@@ -14,6 +14,10 @@ class FakeSettings:
     kis_env = "paper"
     kis_token_cache_path = "data/kis_token_paper.json"
     trading_state_path = "data/test_positions.json"
+    trade_journal_path = ":memory:"
+    order_auto_cancel_enabled = True
+    order_timeout_seconds = 120
+    order_cancel_max_attempts = 3
     entry_min_change_pct = 3.0
     entry_max_change_pct = 30.0
     entry_min_volume_ratio = 4.0

@@ -60,6 +60,17 @@ class OrderResult:
     price: float
     session: str
     order_no: str | None
+    order_org_no: str | None
+    message: str
+    raw: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class CancelResult:
+    market: str
+    symbol: str
+    original_order_no: str
+    cancel_order_no: str | None
     message: str
     raw: dict[str, Any]
 
@@ -387,6 +398,71 @@ class KisClient:
         checked = _checked_payload(response, "KIS overseas order request failed")
         return _order_payload_to_result("US", normalized_side, symbol, quantity, price, normalized_session, checked)
 
+    def cancel_order(
+        self,
+        *,
+        market: str,
+        symbol: str,
+        order_no: str,
+        quantity: int,
+        requested_price: float,
+        order_org_no: str | None = None,
+        exchange: str | None = None,
+        session: str = "regular",
+        order_enabled: bool,
+        paper_trading_only: bool,
+        real_trading_enabled: bool,
+    ) -> CancelResult:
+        self._assert_order_allowed(order_enabled, paper_trading_only, real_trading_enabled)
+        self._require_account()
+        normalized_market = market.strip().upper()
+        if normalized_market == "KR":
+            if not order_org_no:
+                raise ValueError("Domestic cancellation requires the original order organization number.")
+            payload = {
+                "CANO": self.account_no,
+                "ACNT_PRDT_CD": self.account_product_code,
+                "KRX_FWDG_ORD_ORGNO": order_org_no,
+                "ORGN_ODNO": order_no,
+                "ORD_DVSN": "00",
+                "RVSE_CNCL_DVSN_CD": "02",
+                "ORD_QTY": str(_positive_int(quantity, "quantity")),
+                "ORD_UNPR": str(int(_non_negative_float(requested_price, "requested_price"))),
+                "QTY_ALL_ORD_YN": "Y",
+                "EXCG_ID_DVSN_CD": "KRX",
+            }
+            response = self._post_with_auth_retry(
+                "/uapi/domestic-stock/v1/trading/order-rvsecncl",
+                tr_id="VTTC0013U" if self.env == "paper" else "TTTC0013U",
+                payload=payload,
+            )
+            checked = _checked_payload(response, "KIS domestic cancellation request failed")
+            return _cancel_payload_to_result("KR", symbol, order_no, checked)
+        if normalized_market == "US":
+            normalized_session = _normalize_overseas_session(session)
+            if normalized_session == "day":
+                raise RuntimeError("KIS paper daytime cancellation is not documented and is disabled.")
+            payload = {
+                "CANO": self.account_no,
+                "ACNT_PRDT_CD": self.account_product_code,
+                "OVRS_EXCG_CD": _overseas_order_exchange_code(exchange or "NAS"),
+                "PDNO": symbol.strip().upper(),
+                "ORGN_ODNO": order_no,
+                "RVSE_CNCL_DVSN_CD": "02",
+                "ORD_QTY": str(_positive_int(quantity, "quantity")),
+                "OVRS_ORD_UNPR": "0",
+                "MGCO_APTM_ODNO": "",
+                "ORD_SVR_DVSN_CD": "0",
+            }
+            response = self._post_with_auth_retry(
+                "/uapi/overseas-stock/v1/trading/order-rvsecncl",
+                tr_id="VTTT1004U" if self.env == "paper" else "TTTT1004U",
+                payload=payload,
+            )
+            checked = _checked_payload(response, "KIS overseas cancellation request failed")
+            return _cancel_payload_to_result("US", symbol, order_no, checked)
+        raise ValueError("market must be KR or US.")
+
     def build_order_request(
         self,
         *,
@@ -593,6 +669,8 @@ def _overseas_row_to_fill_status(row: dict[str, Any], expected_quantity: float) 
 def _fill_state(ordered: float, filled: float, *, canceled: bool, rejected: bool) -> str:
     if ordered > 0 and filled >= ordered:
         return "FILLED"
+    if canceled and filled > 0:
+        return "PARTIAL_CANCELED"
     if filled > 0:
         return "PARTIAL"
     if rejected:
@@ -672,6 +750,12 @@ def _order_payload_to_result(
 ) -> OrderResult:
     output = _first_dict(payload.get("output"))
     order_no = output.get("ODNO") or output.get("odno")
+    order_org_no = (
+        output.get("KRX_FWDG_ORD_ORGNO")
+        or output.get("krx_fwdg_ord_orgno")
+        or output.get("ORD_GNO_BRNO")
+        or output.get("ord_gno_brno")
+    )
     return OrderResult(
         market=market,
         side=side,
@@ -680,7 +764,26 @@ def _order_payload_to_result(
         price=price,
         session=session,
         order_no=str(order_no) if order_no else None,
+        order_org_no=str(order_org_no) if order_org_no else None,
         message=str(payload.get("msg1") or "order accepted"),
+        raw=payload,
+    )
+
+
+def _cancel_payload_to_result(
+    market: str,
+    symbol: str,
+    original_order_no: str,
+    payload: dict[str, Any],
+) -> CancelResult:
+    output = _first_dict(payload.get("output"))
+    cancel_order_no = output.get("ODNO") or output.get("odno")
+    return CancelResult(
+        market=market,
+        symbol=symbol,
+        original_order_no=original_order_no,
+        cancel_order_no=str(cancel_order_no) if cancel_order_no else None,
+        message=str(payload.get("msg1") or "cancellation accepted"),
         raw=payload,
     )
 

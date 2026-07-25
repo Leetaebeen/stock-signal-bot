@@ -7,6 +7,7 @@ from app.brokers.kis_client import KisClient
 from app.config import Settings
 from app.scanners.momentum import MomentumScanner, load_symbols_from_file, parse_exchange_map, parse_symbol_list
 from app.trading.executor import ExecutionConfig, ExecutionResult, TradingExecutor
+from app.trading.journal import TradeJournal
 from app.trading.sessions import SessionPolicy, active_markets, market_closed_reason
 from app.trading.state import JsonPositionStore
 from app.trading.strategy import KST, MarketSignal, StrategyRules
@@ -48,12 +49,16 @@ class TradingRuntime:
                 session=settings.us_order_session,
                 notify_trades=settings.telegram_notify_trades,
                 notify_errors=settings.telegram_notify_errors,
+                auto_cancel_enabled=settings.order_auto_cancel_enabled,
+                order_timeout_seconds=settings.order_timeout_seconds,
+                cancel_max_attempts=settings.order_cancel_max_attempts,
             ),
             alerter=TelegramAlerter(
                 enabled=settings.telegram_enabled,
                 bot_token=settings.telegram_bot_token,
                 chat_id=settings.telegram_chat_id,
             ),
+            journal=TradeJournal(settings.trade_journal_path),
         )
         self.session_policy = SessionPolicy(
             allow_kr_regular=settings.allow_kr_regular_trading,
@@ -69,7 +74,17 @@ class TradingRuntime:
         active = active_markets(self.session_policy, us_session=self.settings.us_order_session)
         logger.info("scan cycle active_markets=%s", ",".join(active) if active else "NONE")
         results = self._sync_holdings_if_due()
-        results.extend(self.executor.reconcile_pending_orders())
+        pending_results = self.executor.reconcile_pending_orders(cancel_markets=set(active))
+        results.extend(pending_results)
+        for result in pending_results:
+            if result.action != "PENDING":
+                logger.info(
+                    "pending order result symbol=%s action=%s reason=%s order_no=%s",
+                    result.symbol,
+                    result.action,
+                    result.reason,
+                    result.order_no,
+                )
         positions_at_cycle_start = set(self.store.load())
         results.extend(self._monitor_open_positions(active))
         pending_symbols = {item.symbol for item in self.store.load_pending_orders()}

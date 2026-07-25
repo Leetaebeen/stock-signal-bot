@@ -1,7 +1,8 @@
 from datetime import datetime, timedelta
 
-from app.brokers.kis_client import BrokerHolding, OrderFillStatus, OrderResult
+from app.brokers.kis_client import BrokerHolding, CancelResult, OrderFillStatus, OrderResult
 from app.trading.executor import ExecutionConfig, TradingExecutor
+from app.trading.journal import TradeJournal
 from app.trading.state import JsonPositionStore
 from app.trading.strategy import KST, MarketSignal, StrategyRules
 
@@ -11,6 +12,7 @@ class FakeBroker:
         self.orders = []
         self.fill_state = "FILLED"
         self.holdings = []
+        self.cancellations = []
 
     def place_domestic_order(self, **kwargs):
         self.orders.append(kwargs)
@@ -22,6 +24,7 @@ class FakeBroker:
             price=kwargs["price"],
             session="regular",
             order_no=f"order-{len(self.orders)}",
+            order_org_no="06010",
             message="accepted",
             raw={"rt_cd": "0"},
         )
@@ -36,6 +39,7 @@ class FakeBroker:
             price=kwargs["price"],
             session=kwargs["session"],
             order_no=f"order-{len(self.orders)}",
+            order_org_no=None,
             message="accepted",
             raw={"rt_cd": "0"},
         )
@@ -51,6 +55,17 @@ class FakeBroker:
 
     def get_holdings(self, market: str) -> list[BrokerHolding]:
         return [item for item in self.holdings if item.market == market]
+
+    def cancel_order(self, **kwargs):
+        self.cancellations.append(kwargs)
+        return CancelResult(
+            market=kwargs["market"],
+            symbol=kwargs["symbol"],
+            original_order_no=kwargs["order_no"],
+            cancel_order_no="cancel-1",
+            message="accepted",
+            raw={},
+        )
 
 
 class FakeAlerter:
@@ -152,6 +167,51 @@ def test_executor_does_not_duplicate_order_while_fill_is_pending(tmp_path):
     assert len(broker.orders) == 1
 
 
+def test_executor_auto_cancels_stale_pending_order_once(tmp_path):
+    broker = FakeBroker()
+    broker.fill_state = "PENDING"
+    executor = _executor(tmp_path, broker=broker)
+    signal = _strong_signal(
+        "005930",
+        "삼성전자",
+        "KR",
+        price=78000,
+        observed_at=datetime.now(KST) - timedelta(minutes=3),
+    )
+
+    executor.handle_signal(signal)
+    first = executor.reconcile_pending_orders()[0]
+    second = executor.reconcile_pending_orders()[0]
+
+    assert first.action == "CANCEL_SUBMITTED"
+    assert second.action == "PENDING"
+    assert broker.cancellations[0]["order_no"] == "order-1"
+    assert broker.cancellations[0]["order_org_no"] == "06010"
+    assert len(broker.cancellations) == 1
+    assert executor.store.load_pending_orders()[0].cancel_requested_at is not None
+    assert executor.store.load_pending_orders()[0].cancel_attempts == 1
+
+
+def test_executor_does_not_cancel_stale_order_when_market_is_closed(tmp_path):
+    broker = FakeBroker()
+    broker.fill_state = "PENDING"
+    executor = _executor(tmp_path, broker=broker)
+    executor.handle_signal(
+        _strong_signal(
+            "005930",
+            "삼성전자",
+            "KR",
+            price=78000,
+            observed_at=datetime.now(KST) - timedelta(minutes=3),
+        )
+    )
+
+    result = executor.reconcile_pending_orders(cancel_markets=set())[0]
+
+    assert result.action == "PENDING"
+    assert broker.cancellations == []
+
+
 def test_executor_reconciles_broker_holding_into_local_state(tmp_path):
     broker = FakeBroker()
     broker.holdings = [
@@ -166,6 +226,41 @@ def test_executor_reconciles_broker_holding_into_local_state(tmp_path):
     assert position.quantity == 2
     assert position.entry_price == 78000
     assert position.managed is False
+
+
+def test_executor_writes_confirmed_buy_and_sell_to_trade_journal(tmp_path):
+    broker = FakeBroker()
+    journal = TradeJournal(tmp_path / "trades.db")
+    store = JsonPositionStore(tmp_path / "positions.json")
+    executor = _executor(
+        tmp_path,
+        broker=broker,
+        store=store,
+        journal=journal,
+        rules=StrategyRules(take_profit_pct=5.0),
+    )
+    entry_at = datetime.now(KST)
+
+    executor.handle_signal(_strong_signal("HOOD", "Robinhood", "US", price=100, observed_at=entry_at))
+    executor.reconcile_pending_orders()
+    executor.handle_signal(
+        MarketSignal(
+            "HOOD",
+            "Robinhood",
+            "US",
+            106,
+            8,
+            7,
+            5_500_000_000,
+            entry_at + timedelta(minutes=5),
+        )
+    )
+    executor.reconcile_pending_orders()
+
+    summary = journal.performance_summary()["USD"]
+    assert summary["trades"] == 1
+    assert summary["wins"] == 1
+    assert summary["realized_pnl"] == 6
 
 
 def test_executor_notifies_order_failure(tmp_path):
@@ -211,7 +306,7 @@ def _strong_signal(
     )
 
 
-def _executor(tmp_path, *, broker, alerter=None, store=None, rules=None):
+def _executor(tmp_path, *, broker, alerter=None, store=None, rules=None, journal=None):
     return TradingExecutor(
         broker=broker,
         store=store or JsonPositionStore(tmp_path / "positions.json"),
@@ -223,4 +318,5 @@ def _executor(tmp_path, *, broker, alerter=None, store=None, rules=None):
             real_trading_enabled=False,
         ),
         alerter=alerter,
+        journal=journal,
     )

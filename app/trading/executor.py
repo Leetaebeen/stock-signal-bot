@@ -1,11 +1,12 @@
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Protocol
 
 from app.alerts.telegram import TelegramAlerter
 from app.alerts.trade_messages import OrderFailure, TradeFill, build_order_failure_message, build_trade_fill_message
-from app.brokers.kis_client import BrokerHolding, OrderFillStatus, OrderResult
+from app.brokers.kis_client import BrokerHolding, CancelResult, OrderFillStatus, OrderResult
+from app.trading.journal import FillRecord, TradeJournal
 from app.trading.state import JsonPositionStore, PendingOrder
 from app.trading.strategy import KST, MarketSignal, Position, StrategyRules, evaluate_entry, evaluate_exit, open_position
 
@@ -58,6 +59,23 @@ class TradingBroker(Protocol):
     def get_holdings(self, market: str) -> list[BrokerHolding]:
         ...
 
+    def cancel_order(
+        self,
+        *,
+        market: str,
+        symbol: str,
+        order_no: str,
+        quantity: int,
+        requested_price: float,
+        order_org_no: str | None = None,
+        exchange: str | None = None,
+        session: str = "regular",
+        order_enabled: bool,
+        paper_trading_only: bool,
+        real_trading_enabled: bool,
+    ) -> CancelResult:
+        ...
+
 
 @dataclass(frozen=True)
 class ExecutionConfig:
@@ -71,6 +89,9 @@ class ExecutionConfig:
     order_type: str = "limit"
     notify_trades: bool = True
     notify_errors: bool = True
+    auto_cancel_enabled: bool = True
+    order_timeout_seconds: int = 120
+    cancel_max_attempts: int = 3
 
 
 @dataclass(frozen=True)
@@ -90,12 +111,14 @@ class TradingExecutor:
         rules: StrategyRules,
         config: ExecutionConfig,
         alerter: TelegramAlerter | None = None,
+        journal: TradeJournal | None = None,
     ) -> None:
         self.broker = broker
         self.store = store
         self.rules = rules
         self.config = config
         self.alerter = alerter
+        self.journal = journal
 
     def handle_signal(self, signal: MarketSignal) -> ExecutionResult:
         pending = self.store.pending_for_symbol(signal.symbol)
@@ -146,6 +169,8 @@ class TradingExecutor:
                 submitted_at=signal.observed_at or datetime.now(KST),
                 reason=decision.reason,
                 exchange=signal.exchange,
+                session=order.session,
+                order_org_no=order.order_org_no,
             )
         )
         return ExecutionResult("SUBMITTED", signal.symbol, decision.reason, order_no=order.order_no)
@@ -192,11 +217,16 @@ class TradingExecutor:
                 submitted_at=signal.observed_at or datetime.now(KST),
                 reason=decision.reason,
                 exchange=signal.exchange or updated.exchange,
+                session=order.session,
+                order_org_no=order.order_org_no,
             )
         )
         return ExecutionResult("SUBMITTED", signal.symbol, decision.reason, order_no=order.order_no)
 
-    def reconcile_pending_orders(self) -> list[ExecutionResult]:
+    def reconcile_pending_orders(
+        self,
+        cancel_markets: set[str] | None = None,
+    ) -> list[ExecutionResult]:
         results: list[ExecutionResult] = []
         for pending in self.store.load_pending_orders():
             try:
@@ -219,16 +249,89 @@ class TradingExecutor:
 
             if status.state == "FILLED":
                 results.append(self._apply_confirmed_fill(pending, status))
+            elif status.state == "PARTIAL_CANCELED":
+                results.append(self._apply_confirmed_fill(pending, status, partial=True))
             elif status.state in {"CANCELED", "REJECTED"}:
                 self.store.remove_pending_order(pending.order_no)
                 reason = f"주문 {status.state.lower()}"
-                self._notify_failure(_pending_to_signal(pending), pending.side.upper(), reason)
+                if status.state == "REJECTED":
+                    self._notify_failure(_pending_to_signal(pending), pending.side.upper(), reason)
                 results.append(ExecutionResult(status.state, pending.symbol, reason, pending.order_no))
+            elif (
+                cancel_markets is None
+                or pending.market.strip().upper() in cancel_markets
+            ) and self._should_cancel(pending, status):
+                results.append(self._request_cancel(pending, status))
             else:
                 results.append(
                     ExecutionResult(status.state, pending.symbol, "체결 확인 대기", pending.order_no)
                 )
         return results
+
+    def _should_cancel(self, pending: PendingOrder, status: OrderFillStatus) -> bool:
+        if not self.config.auto_cancel_enabled or self.config.order_timeout_seconds <= 0:
+            return False
+        if pending.cancel_attempts >= self.config.cancel_max_attempts:
+            return False
+        if status.state not in {"PENDING", "PARTIAL", "UNKNOWN"}:
+            return False
+        reference_time = pending.cancel_requested_at or pending.submitted_at
+        if reference_time.tzinfo is None:
+            reference_time = reference_time.replace(tzinfo=KST)
+        age_seconds = (datetime.now(KST) - reference_time.astimezone(KST)).total_seconds()
+        return age_seconds >= self.config.order_timeout_seconds
+
+    def _request_cancel(
+        self,
+        pending: PendingOrder,
+        status: OrderFillStatus,
+    ) -> ExecutionResult:
+        order_org_no = pending.order_org_no or str(
+            status.raw.get("ord_gno_brno")
+            or status.raw.get("krx_fwdg_ord_orgno")
+            or ""
+        )
+        remaining_quantity = max(int(pending.quantity - status.filled_quantity), 1)
+        try:
+            self.broker.cancel_order(
+                market=pending.market,
+                symbol=pending.symbol,
+                order_no=pending.order_no,
+                quantity=remaining_quantity,
+                requested_price=pending.requested_price,
+                order_org_no=order_org_no or None,
+                exchange=pending.exchange,
+                session=pending.session,
+                order_enabled=self.config.order_enabled,
+                paper_trading_only=self.config.paper_trading_only,
+                real_trading_enabled=self.config.real_trading_enabled,
+            )
+        except Exception as exc:
+            self.store.add_pending_order(
+                replace(
+                    pending,
+                    order_org_no=order_org_no or pending.order_org_no,
+                    cancel_requested_at=datetime.now(KST),
+                    cancel_attempts=pending.cancel_attempts + 1,
+                )
+            )
+            logger.warning(
+                "cancellation failed order_no=%s symbol=%s reason=%s",
+                pending.order_no,
+                pending.symbol,
+                exc,
+            )
+            return ExecutionResult("PENDING", pending.symbol, f"취소 요청 실패: {exc}", pending.order_no)
+
+        self.store.add_pending_order(
+            replace(
+                pending,
+                order_org_no=order_org_no or pending.order_org_no,
+                cancel_requested_at=datetime.now(KST),
+                cancel_attempts=pending.cancel_attempts + 1,
+            )
+        )
+        return ExecutionResult("CANCEL_SUBMITTED", pending.symbol, "미체결 주문 자동 취소 요청", pending.order_no)
 
     def reconcile_holdings(self, market: str) -> list[ExecutionResult]:
         holdings = self.broker.get_holdings(market)
@@ -286,6 +389,8 @@ class TradingExecutor:
         self,
         pending: PendingOrder,
         status: OrderFillStatus,
+        *,
+        partial: bool = False,
     ) -> ExecutionResult:
         fill_price = status.average_price or pending.requested_price
         fill_quantity = status.filled_quantity or pending.quantity
@@ -299,6 +404,20 @@ class TradingExecutor:
             signal = _pending_to_signal(pending, price=fill_price, observed_at=filled_at)
             positions[pending.symbol] = open_position(signal, quantity=fill_quantity, entry_at=filled_at)
             self.store.save_state(positions, remaining_orders)
+            self._record_fill(
+                FillRecord(
+                    order_no=pending.order_no,
+                    symbol=pending.symbol,
+                    name=pending.name,
+                    market=pending.market,
+                    side="BUY",
+                    quantity=fill_quantity,
+                    price=fill_price,
+                    currency=_currency_for_market(pending.market),
+                    reason=pending.reason,
+                    filled_at=filled_at,
+                )
+            )
             self._notify_fill(
                 TradeFill(
                     symbol=pending.symbol,
@@ -312,12 +431,31 @@ class TradingExecutor:
                     filled_at=filled_at,
                 )
             )
-            action = "BUY"
+            action = "BUY_PARTIAL" if partial else "BUY"
         else:
-            position = positions.pop(pending.symbol, None)
+            position = positions.get(pending.symbol)
+            if partial and position and position.quantity > fill_quantity:
+                positions[pending.symbol] = replace(position, quantity=position.quantity - fill_quantity)
+            else:
+                positions.pop(pending.symbol, None)
             self.store.save_state(positions, remaining_orders)
             holding_seconds = (
                 int((filled_at - position.entry_at).total_seconds()) if position is not None else None
+            )
+            self._record_fill(
+                FillRecord(
+                    order_no=pending.order_no,
+                    symbol=pending.symbol,
+                    name=pending.name,
+                    market=pending.market,
+                    side="SELL",
+                    quantity=fill_quantity,
+                    price=fill_price,
+                    entry_price=position.entry_price if position else None,
+                    currency=_currency_for_market(pending.market),
+                    reason=pending.reason,
+                    filled_at=filled_at,
+                )
             )
             self._notify_fill(
                 TradeFill(
@@ -334,7 +472,7 @@ class TradingExecutor:
                     filled_at=filled_at,
                 )
             )
-            action = "SELL"
+            action = "SELL_PARTIAL" if partial else "SELL"
 
         return ExecutionResult(action, pending.symbol, pending.reason, pending.order_no)
 
@@ -362,6 +500,14 @@ class TradingExecutor:
             paper_trading_only=self.config.paper_trading_only,
             real_trading_enabled=self.config.real_trading_enabled,
         )
+
+    def _record_fill(self, fill: FillRecord) -> None:
+        if not self.journal:
+            return
+        try:
+            self.journal.record_fill(fill)
+        except Exception:
+            logger.exception("trade journal write failed order_no=%s symbol=%s", fill.order_no, fill.symbol)
 
     def _notify_fill(self, fill: TradeFill) -> None:
         if self.alerter and self.config.notify_trades:

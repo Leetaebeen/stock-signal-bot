@@ -11,6 +11,8 @@
 - 국내/해외 현재가 조회
 - 국내/해외 1분봉 조회
 - 국내/해외 모의 주문 및 실제 체결 조회
+- 120초 이상 미체결 주문 자동 취소 및 최대 3회 재확인
+- SQLite 체결·실현손익 거래 저널
 - 종목별 NASDAQ/NYSE 거래소 라우팅
 - 분봉 거래량, 1분·5분 상승률, 고점 돌파, VWAP 이격 기반 진입
 - 익절, 손절, 트레일링 스톱, 최대 보유시간 청산
@@ -65,6 +67,7 @@ python -m app.tools.kis_balance_check
 python -m app.tools.kis_quote_check 005930 --market KR --name 삼성전자
 python -m app.tools.kis_quote_check NVDA --market US --exchange NAS --name NVIDIA
 python -m app.tools.telegram_test
+python -m app.tools.trade_summary
 ```
 
 ## 주문 드라이런
@@ -100,4 +103,5 @@ python -m app.tools.kis_order_check US buy NVDA --qty 1 --price 160 --exchange N
 - `ORDER_ENABLED=false`가 기본값입니다.
 - 실계좌 자동주문은 구현하지 않습니다.
 - 주문 접수만으로 체결 처리하지 않으며 KIS 체결 내역 확인 후 포지션과 알림을 갱신합니다.
+- 미체결 취소도 KIS 취소 완료를 확인한 뒤 로컬 상태에서 제거합니다.
 - 로컬에 없던 계좌 보유 종목은 자동 매도하지 않는 관리 제외 상태로 반영합니다.

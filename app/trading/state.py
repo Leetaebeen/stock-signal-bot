@@ -18,6 +18,10 @@ class PendingOrder:
     submitted_at: datetime
     reason: str
     exchange: str | None = None
+    session: str = "regular"
+    order_org_no: str | None = None
+    cancel_requested_at: datetime | None = None
+    cancel_attempts: int = 0
 
 
 class JsonPositionStore:
@@ -125,6 +129,11 @@ def _position_from_json(payload: dict[str, object]) -> Position:
 def _pending_order_to_json(order: PendingOrder) -> dict[str, object]:
     payload = asdict(order)
     payload["submitted_at"] = order.submitted_at.astimezone(KST).isoformat()
+    payload["cancel_requested_at"] = (
+        order.cancel_requested_at.astimezone(KST).isoformat()
+        if order.cancel_requested_at
+        else None
+    )
     return payload
 
 
@@ -140,4 +149,12 @@ def _pending_order_from_json(payload: dict[str, object]) -> PendingOrder:
         submitted_at=datetime.fromisoformat(str(payload["submitted_at"])),
         reason=str(payload.get("reason") or ""),
         exchange=str(payload["exchange"]) if payload.get("exchange") else None,
+        session=str(payload.get("session") or "regular"),
+        order_org_no=str(payload["order_org_no"]) if payload.get("order_org_no") else None,
+        cancel_requested_at=(
+            datetime.fromisoformat(str(payload["cancel_requested_at"]))
+            if payload.get("cancel_requested_at")
+            else None
+        ),
+        cancel_attempts=int(payload.get("cancel_attempts") or 0),
     )

@@ -276,6 +276,21 @@ def test_get_domestic_fill_status_uses_order_history(tmp_path):
     assert status.average_price == 78100
 
 
+def test_domestic_partially_filled_canceled_order_is_final_partial_state():
+    status = kis_client_module._domestic_row_to_fill_status(
+        {
+            "ord_qty": "2",
+            "tot_ccld_qty": "1",
+            "avg_prvs": "78100",
+            "cncl_yn": "Y",
+        },
+        expected_quantity=2,
+    )
+
+    assert status.state == "PARTIAL_CANCELED"
+    assert status.filled_quantity == 1
+
+
 def test_get_overseas_fill_status_matches_order_locally_in_paper_mode(tmp_path):
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/oauth2/tokenP":
@@ -463,7 +478,14 @@ def test_place_domestic_paper_buy_order_uses_hashkey_and_paper_tr_id(tmp_path):
             assert payload["PDNO"] == "005930"
             assert payload["ORD_QTY"] == "1"
             assert payload["ORD_UNPR"] == "78000"
-            return httpx.Response(200, json={"rt_cd": "0", "msg1": "accepted", "output": {"ODNO": "000001"}})
+            return httpx.Response(
+                200,
+                json={
+                    "rt_cd": "0",
+                    "msg1": "accepted",
+                    "output": {"ODNO": "000001", "KRX_FWDG_ORD_ORGNO": "06010"},
+                },
+            )
         return httpx.Response(404)
 
     client = KisClient(
@@ -490,6 +512,49 @@ def test_place_domestic_paper_buy_order_uses_hashkey_and_paper_tr_id(tmp_path):
     assert result.side == "buy"
     assert result.session == "regular"
     assert result.order_no == "000001"
+    assert result.order_org_no == "06010"
+
+
+def test_cancel_domestic_paper_order_uses_original_order_fields(tmp_path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth2/tokenP":
+            return httpx.Response(200, json={"access_token": "token", "token_type": "Bearer", "expires_in": 3600})
+        if request.url.path == "/uapi/hashkey":
+            return httpx.Response(200, json={"HASH": "cancel-hash"})
+        if request.url.path == "/uapi/domestic-stock/v1/trading/order-rvsecncl":
+            payload = json.loads(request.content)
+            assert request.headers["tr_id"] == "VTTC0013U"
+            assert payload["KRX_FWDG_ORD_ORGNO"] == "06010"
+            assert payload["ORGN_ODNO"] == "000001"
+            assert payload["RVSE_CNCL_DVSN_CD"] == "02"
+            assert payload["QTY_ALL_ORD_YN"] == "Y"
+            return httpx.Response(200, json={"rt_cd": "0", "msg1": "accepted", "output": {"ODNO": "000011"}})
+        return httpx.Response(404)
+
+    client = KisClient(
+        app_key="app-key",
+        app_secret="app-secret",
+        account_no="12345678",
+        account_product_code="01",
+        env="paper",
+        token_cache_path=str(tmp_path / "kis_token.json"),
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    result = client.cancel_order(
+        market="KR",
+        symbol="005930",
+        order_no="000001",
+        quantity=1,
+        requested_price=78000,
+        order_org_no="06010",
+        order_enabled=True,
+        paper_trading_only=True,
+        real_trading_enabled=False,
+    )
+
+    assert result.original_order_no == "000001"
+    assert result.cancel_order_no == "000011"
 
 
 def test_place_overseas_paper_sell_order_maps_exchange_and_tr_id(tmp_path):
@@ -534,6 +599,48 @@ def test_place_overseas_paper_sell_order_maps_exchange_and_tr_id(tmp_path):
     assert result.side == "sell"
     assert result.session == "regular"
     assert result.order_no == "000002"
+
+
+def test_cancel_overseas_paper_order_uses_regular_cancel_api(tmp_path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth2/tokenP":
+            return httpx.Response(200, json={"access_token": "token", "token_type": "Bearer", "expires_in": 3600})
+        if request.url.path == "/uapi/hashkey":
+            return httpx.Response(200, json={"HASH": "cancel-hash"})
+        if request.url.path == "/uapi/overseas-stock/v1/trading/order-rvsecncl":
+            payload = json.loads(request.content)
+            assert request.headers["tr_id"] == "VTTT1004U"
+            assert payload["OVRS_EXCG_CD"] == "NASD"
+            assert payload["ORGN_ODNO"] == "000002"
+            assert payload["RVSE_CNCL_DVSN_CD"] == "02"
+            assert payload["OVRS_ORD_UNPR"] == "0"
+            return httpx.Response(200, json={"rt_cd": "0", "msg1": "accepted", "output": {"ODNO": "000012"}})
+        return httpx.Response(404)
+
+    client = KisClient(
+        app_key="app-key",
+        app_secret="app-secret",
+        account_no="12345678",
+        account_product_code="01",
+        env="paper",
+        token_cache_path=str(tmp_path / "kis_token.json"),
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    result = client.cancel_order(
+        market="US",
+        symbol="NVDA",
+        order_no="000002",
+        quantity=1,
+        requested_price=144.2,
+        exchange="NAS",
+        session="regular",
+        order_enabled=True,
+        paper_trading_only=True,
+        real_trading_enabled=False,
+    )
+
+    assert result.cancel_order_no == "000012"
 
 
 def test_place_overseas_order_retries_once_when_kis_rate_limited(tmp_path, monkeypatch):
