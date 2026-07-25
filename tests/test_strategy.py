@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 
 from app.trading.state import JsonPositionStore, PendingOrder
-from app.trading.strategy import KST, MarketSignal, StrategyRules, evaluate_entry, evaluate_exit, open_position
+from app.trading.strategy import KST, MarketSignal, Position, StrategyRules, evaluate_entry, evaluate_exit, open_position
 
 
 def test_entry_buys_when_momentum_volume_value_and_score_pass():
@@ -156,8 +156,69 @@ def test_position_store_round_trips(tmp_path):
     assert loaded["005930"].name == "삼성전자"
     assert loaded["005930"].entry_price == 78000.0
     assert loaded["005930"].exchange == "KRX"
+    assert loaded["005930"].liquidation_requested is False
     assert removed is not None
     assert store.load() == {}
+
+
+def test_position_store_requests_liquidation_and_enables_management(tmp_path):
+    store = JsonPositionStore(tmp_path / "positions.json")
+    store.upsert(
+        Position(
+            symbol="005930",
+            name="Samsung Electronics",
+            market="KR",
+            quantity=4,
+            entry_price=290000,
+            entry_at=datetime.now(KST),
+            highest_price=290000,
+            exchange="KRX",
+            managed=False,
+        )
+    )
+
+    requested = store.request_liquidation("005930", "KR")
+
+    assert requested.managed is True
+    assert requested.liquidation_requested is True
+    assert store.load()["005930"].liquidation_requested is True
+
+
+def test_position_store_rejects_liquidation_when_order_is_pending(tmp_path):
+    store = JsonPositionStore(tmp_path / "positions.json")
+    store.upsert(
+        Position(
+            symbol="005930",
+            name="Samsung Electronics",
+            market="KR",
+            quantity=4,
+            entry_price=290000,
+            entry_at=datetime.now(KST),
+            highest_price=290000,
+            exchange="KRX",
+            managed=False,
+        )
+    )
+    store.add_pending_order(
+        PendingOrder(
+            order_no="000001",
+            market="KR",
+            side="sell",
+            symbol="005930",
+            name="Samsung Electronics",
+            quantity=4,
+            requested_price=250000,
+            submitted_at=datetime.now(KST),
+            reason="test",
+        )
+    )
+
+    try:
+        store.request_liquidation("005930", "KR")
+    except RuntimeError as exc:
+        assert "pending order" in str(exc)
+    else:
+        raise AssertionError("pending order must block a liquidation request")
 
 
 def test_position_store_preserves_pending_orders_when_positions_change(tmp_path):

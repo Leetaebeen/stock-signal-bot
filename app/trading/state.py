@@ -1,5 +1,5 @@
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
@@ -90,6 +90,26 @@ class JsonPositionStore:
             None,
         )
 
+    def request_liquidation(self, symbol: str, market: str) -> Position:
+        normalized_symbol = symbol.strip().upper()
+        normalized_market = market.strip().upper()
+        if self.pending_for_symbol(normalized_symbol):
+            raise RuntimeError(f"{normalized_symbol} has a pending order.")
+
+        positions = self.load()
+        position = positions.get(normalized_symbol)
+        if position is None:
+            raise ValueError(f"Position not found: {normalized_symbol}")
+        if position.market.strip().upper() != normalized_market:
+            raise ValueError(
+                f"Position market mismatch: expected {position.market}, got {normalized_market}"
+            )
+
+        requested = replace(position, managed=True, liquidation_requested=True)
+        positions[normalized_symbol] = requested
+        self.save(positions)
+        return requested
+
     def _read(self) -> dict[str, object]:
         if not self.path.exists():
             return {"positions": [], "pending_orders": []}
@@ -123,6 +143,7 @@ def _position_from_json(payload: dict[str, object]) -> Position:
         highest_price=float(payload["highest_price"]),
         exchange=str(payload["exchange"]) if payload.get("exchange") else None,
         managed=bool(payload.get("managed", True)),
+        liquidation_requested=bool(payload.get("liquidation_requested", False)),
     )
 
 

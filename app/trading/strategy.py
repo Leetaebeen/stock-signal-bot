@@ -58,6 +58,7 @@ class Position:
     highest_price: float
     exchange: str | None = None
     managed: bool = True
+    liquidation_requested: bool = False
 
     def with_price(self, price: float) -> "Position":
         return replace(self, highest_price=max(self.highest_price, price))
@@ -175,6 +176,7 @@ def open_position(signal: MarketSignal, quantity: float, entry_at: datetime | No
         highest_price=signal.price,
         exchange=signal.exchange,
         managed=True,
+        liquidation_requested=False,
     )
 
 

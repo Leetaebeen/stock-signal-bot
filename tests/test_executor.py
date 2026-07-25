@@ -4,7 +4,7 @@ from app.brokers.kis_client import BrokerHolding, CancelResult, OrderFillStatus,
 from app.trading.executor import ExecutionConfig, TradingExecutor
 from app.trading.journal import TradeJournal
 from app.trading.state import JsonPositionStore
-from app.trading.strategy import KST, MarketSignal, StrategyRules
+from app.trading.strategy import KST, MarketSignal, Position, StrategyRules
 
 
 class FakeBroker:
@@ -151,6 +151,50 @@ def test_executor_sells_existing_position_on_take_profit(tmp_path):
     assert "[모의 매도 체결]" in alerter.messages[-1]
 
 
+def test_executor_sells_position_when_liquidation_is_requested(tmp_path):
+    broker = FakeBroker()
+    store = JsonPositionStore(tmp_path / "positions.json")
+    store.upsert(
+        Position(
+            symbol="005930",
+            name="Samsung Electronics",
+            market="KR",
+            quantity=4,
+            entry_price=290000,
+            entry_at=datetime.now(KST),
+            highest_price=290000,
+            exchange="KRX",
+            managed=True,
+            liquidation_requested=True,
+        )
+    )
+    executor = _executor(tmp_path, broker=broker, store=store)
+
+    submitted = executor.handle_signal(
+        MarketSignal(
+            "005930",
+            "Samsung Electronics",
+            "KR",
+            249500,
+            -1,
+            0,
+            1_000_000_000,
+            datetime.now(KST),
+            exchange="KRX",
+        )
+    )
+
+    assert submitted.action == "SUBMITTED"
+    assert submitted.reason == "사용자 요청 모의 포지션 정리"
+    assert broker.orders[-1]["side"] == "sell"
+    assert broker.orders[-1]["quantity"] == 4
+
+    confirmed = executor.reconcile_pending_orders()[0]
+
+    assert confirmed.action == "SELL"
+    assert store.load() == {}
+
+
 def test_executor_does_not_duplicate_order_while_fill_is_pending(tmp_path):
     broker = FakeBroker()
     broker.fill_state = "PENDING"
@@ -226,6 +270,35 @@ def test_executor_reconciles_broker_holding_into_local_state(tmp_path):
     assert position.quantity == 2
     assert position.entry_price == 78000
     assert position.managed is False
+
+
+def test_executor_preserves_liquidation_request_during_holding_sync(tmp_path):
+    broker = FakeBroker()
+    broker.holdings = [
+        BrokerHolding("005930", "Samsung Electronics", "KR", 4, 290000, 249500, "KRX")
+    ]
+    store = JsonPositionStore(tmp_path / "positions.json")
+    store.upsert(
+        Position(
+            symbol="005930",
+            name="Samsung Electronics",
+            market="KR",
+            quantity=4,
+            entry_price=290000,
+            entry_at=datetime.now(KST),
+            highest_price=290000,
+            exchange="KRX",
+            managed=True,
+            liquidation_requested=True,
+        )
+    )
+    executor = _executor(tmp_path, broker=broker, store=store)
+
+    executor.reconcile_holdings("KR")
+
+    position = store.load()["005930"]
+    assert position.managed is True
+    assert position.liquidation_requested is True
 
 
 def test_executor_writes_confirmed_buy_and_sell_to_trade_journal(tmp_path):

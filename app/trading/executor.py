@@ -8,7 +8,16 @@ from app.alerts.trade_messages import OrderFailure, TradeFill, build_order_failu
 from app.brokers.kis_client import BrokerHolding, CancelResult, OrderFillStatus, OrderResult
 from app.trading.journal import FillRecord, TradeJournal
 from app.trading.state import JsonPositionStore, PendingOrder
-from app.trading.strategy import KST, MarketSignal, Position, StrategyRules, evaluate_entry, evaluate_exit, open_position
+from app.trading.strategy import (
+    KST,
+    MarketSignal,
+    Position,
+    StrategyRules,
+    TradeDecision,
+    evaluate_entry,
+    evaluate_exit,
+    open_position,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -182,7 +191,11 @@ class TradingExecutor:
         positions: dict[str, Position],
     ) -> ExecutionResult:
         updated = position.with_price(signal.price)
-        decision = evaluate_exit(updated, current_price=signal.price, now=signal.observed_at, rules=self.rules)
+        decision = (
+            TradeDecision("SELL", "사용자 요청 모의 포지션 정리")
+            if updated.liquidation_requested
+            else evaluate_exit(updated, current_price=signal.price, now=signal.observed_at, rules=self.rules)
+        )
         if not decision.should_sell:
             positions[signal.symbol] = updated
             self.store.save(positions)
@@ -359,6 +372,7 @@ class TradingExecutor:
                     highest_price=max(existing.highest_price, holding.current_price, entry_price),
                     exchange=holding.exchange or existing.exchange,
                     managed=existing.managed,
+                    liquidation_requested=existing.liquidation_requested,
                 )
                 continue
             positions[symbol] = Position(
@@ -371,6 +385,7 @@ class TradingExecutor:
                 highest_price=max(holding.current_price, entry_price),
                 exchange=holding.exchange,
                 managed=False,
+                liquidation_requested=False,
             )
             results.append(ExecutionResult("SYNCED", symbol, "미추적 계좌 보유 종목을 관리 제외로 반영"))
 

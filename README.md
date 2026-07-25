@@ -70,6 +70,8 @@ python -m app.tools.kis_quote_check 005930 --market KR --name 삼성전자
 python -m app.tools.kis_quote_check NVDA --market US --exchange NAS --name NVIDIA
 python -m app.tools.telegram_test
 python -m app.tools.trade_summary
+python -m app.tools.request_liquidation 005930 --market KR
+python -m app.tools.request_liquidation 005930 --market KR --confirm
 ```
 
 ## 주문 드라이런

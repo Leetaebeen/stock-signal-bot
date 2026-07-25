@@ -162,6 +162,43 @@ def test_runtime_does_not_auto_sell_untracked_account_holding(tmp_path):
     assert runtime._monitor_open_positions(["KR"]) == []
 
 
+def test_runtime_monitors_untracked_holding_with_liquidation_request(tmp_path):
+    settings = FakeSettings()
+    settings.trading_state_path = str(tmp_path / "positions.json")
+    runtime = TradingRuntime(settings)
+    runtime.store.save(
+        {
+            "005930": Position(
+                symbol="005930",
+                name="Samsung Electronics",
+                market="KR",
+                quantity=4,
+                entry_price=290000,
+                entry_at=datetime.now(KST),
+                highest_price=290000,
+                exchange="KRX",
+                managed=False,
+                liquidation_requested=True,
+            )
+        }
+    )
+
+    class FakeClient:
+        def get_domestic_price(self, symbol, name):
+            return PriceSnapshot(symbol, name, "KR", 249500, -1, 1_000_000_000, "KRX")
+
+    class FakeExecutor:
+        def handle_signal(self, signal):
+            return ExecutionResult("SUBMITTED", signal.symbol, "requested", "order-1")
+
+    runtime.client = FakeClient()
+    runtime.executor = FakeExecutor()
+
+    results = runtime._monitor_open_positions(["KR"])
+
+    assert results[0].action == "SUBMITTED"
+
+
 def test_runtime_records_candidate_features_and_execution_result(tmp_path):
     settings = FakeSettings()
     settings.trading_state_path = str(tmp_path / "positions.json")

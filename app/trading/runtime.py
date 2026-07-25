@@ -251,7 +251,7 @@ class TradingRuntime:
     def _monitor_open_positions(self, active_markets_now: list[str]) -> list[ExecutionResult]:
         results: list[ExecutionResult] = []
         for position in self.store.load().values():
-            if not position.managed:
+            if not position.managed and not position.liquidation_requested:
                 continue
             if position.market.upper() not in active_markets_now:
                 continue
