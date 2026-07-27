@@ -104,6 +104,14 @@ class BuyingPower:
     raw: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class RankedSymbol:
+    symbol: str
+    name: str
+    market: str
+    exchange: str | None = None
+
+
 class KisClient:
     def __init__(
         self,
@@ -375,6 +383,110 @@ class KisClient:
         if snapshot.price <= 0:
             raise RuntimeError(f"KIS overseas price returned zero price: {exchange}:{symbol}")
         return snapshot
+
+    def get_domestic_ranked_symbols(self, limit: int = 20) -> list[RankedSymbol]:
+        response = self._get_with_auth_retry(
+            "/uapi/domestic-stock/v1/quotations/volume-rank",
+            tr_id="FHPST01710000",
+            params={
+                "FID_COND_MRKT_DIV_CODE": "J",
+                "FID_COND_SCR_DIV_CODE": "20171",
+                "FID_INPUT_ISCD": "0000",
+                "FID_DIV_CLS_CODE": "1",
+                "FID_BLNG_CLS_CODE": "3",
+                "FID_TRGT_CLS_CODE": "000000000",
+                "FID_TRGT_EXLS_CLS_CODE": "1111111111",
+                "FID_INPUT_PRICE_1": "0",
+                "FID_INPUT_PRICE_2": "1000000",
+                "FID_VOL_CNT": "100000",
+                "FID_INPUT_DATE_1": "",
+            },
+        )
+        payload = _checked_payload(response, "KIS domestic ranking request failed")
+        ranked = []
+        for row in _dict_list(payload.get("output")):
+            symbol = str(
+                row.get("mksc_shrn_iscd")
+                or row.get("stck_shrn_iscd")
+                or row.get("pdno")
+                or ""
+            ).strip()
+            if symbol:
+                ranked.append(
+                    RankedSymbol(
+                        symbol=symbol,
+                        name=str(row.get("hts_kor_isnm") or symbol),
+                        market="KR",
+                        exchange="KRX",
+                    )
+                )
+        return ranked[: max(limit, 0)]
+
+    def get_overseas_ranked_symbols(
+        self,
+        exchange: str = "NAS",
+        limit: int = 10,
+    ) -> list[RankedSymbol]:
+        normalized_exchange = exchange.strip().upper()
+        response = self._get_with_auth_retry(
+            "/uapi/overseas-stock/v1/ranking/updown-rate",
+            tr_id="HHDFS76290000",
+            params={
+                "EXCD": normalized_exchange,
+                "NDAY": "0",
+                "GUBN": "1",
+                "VOL_RANG": "4",
+                "AUTH": "",
+                "KEYB": "",
+            },
+        )
+        payload = _checked_payload(response, "KIS overseas ranking request failed")
+        ranked = []
+        for row in _dict_list(payload.get("output2") or payload.get("output")):
+            symbol = str(row.get("symb") or row.get("rsym") or row.get("symbol") or "").strip().upper()
+            if symbol:
+                ranked.append(
+                    RankedSymbol(
+                        symbol=symbol,
+                        name=str(row.get("name") or row.get("ename") or symbol),
+                        market="US",
+                        exchange=normalized_exchange,
+                    )
+                )
+        return ranked[: max(limit, 0)]
+
+    def is_market_business_day(self, market: str, date_value: datetime) -> bool | None:
+        normalized_market = market.strip().upper()
+        date_text = date_value.strftime("%Y%m%d")
+        if normalized_market == "KR":
+            response = self._get_with_auth_retry(
+                "/uapi/domestic-stock/v1/quotations/chk-holiday",
+                tr_id="CTCA0903R",
+                params={"BASS_DT": date_text, "CTX_AREA_FK": "", "CTX_AREA_NK": ""},
+            )
+            payload = _checked_payload(response, "KIS domestic holiday request failed")
+            date_keys = ("bass_dt", "base_dt")
+            open_keys = ("opnd_yn", "tr_day_yn", "bzdy_yn")
+        elif normalized_market == "US":
+            response = self._get_with_auth_retry(
+                "/uapi/overseas-stock/v1/quotations/countries-holiday",
+                tr_id="CTOS5011R",
+                params={"TRAD_DT": date_text, "CTX_AREA_NK": "", "CTX_AREA_FK": ""},
+            )
+            payload = _checked_payload(response, "KIS overseas holiday request failed")
+            date_keys = ("trad_dt", "bass_dt", "base_dt")
+            open_keys = ("tr_day_yn", "opnd_yn", "us_tr_day_yn")
+        else:
+            raise ValueError("market must be KR or US.")
+
+        for row in _dict_list(payload.get("output")):
+            row_date = next((str(row.get(key) or "") for key in date_keys if row.get(key)), "")
+            if row_date and row_date != date_text:
+                continue
+            value = next((str(row.get(key) or "").upper() for key in open_keys if row.get(key)), "")
+            if value in {"Y", "N"}:
+                return value == "Y"
+        return None
 
     def get_domestic_minute_bars(self, symbol: str, limit: int = 30) -> list[MinuteBar]:
         response = self._get_with_auth_retry(

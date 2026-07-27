@@ -1,3 +1,4 @@
+import csv
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -329,6 +330,118 @@ class TradeJournal:
             "average_return_15m": float(row["average_return_15m"]),
             "average_return_30m": float(row["average_return_30m"]),
         }
+
+    def fill_summary(self) -> dict[str, dict[str, int]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    market,
+                    SUM(CASE WHEN side = 'BUY' THEN 1 ELSE 0 END) AS buys,
+                    SUM(CASE WHEN side = 'SELL' THEN 1 ELSE 0 END) AS sells
+                FROM trade_fills
+                GROUP BY market
+                """
+            ).fetchall()
+        return {
+            str(row["market"]): {
+                "buys": int(row["buys"] or 0),
+                "sells": int(row["sells"] or 0),
+            }
+            for row in rows
+        }
+
+    def signal_summary_by_market(self) -> dict[str, dict[str, float | int]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    market,
+                    COUNT(*) AS observations,
+                    COUNT(return_5m) AS labeled_5m,
+                    COUNT(return_15m) AS labeled_15m,
+                    COUNT(return_30m) AS labeled_30m,
+                    COALESCE(AVG(return_5m), 0) AS average_return_5m,
+                    COALESCE(AVG(return_15m), 0) AS average_return_15m,
+                    COALESCE(AVG(return_30m), 0) AS average_return_30m,
+                    COALESCE(
+                        AVG(
+                            CASE
+                                WHEN return_30m IS NULL THEN NULL
+                                WHEN return_30m > 0 THEN 1.0
+                                ELSE 0.0
+                            END
+                        ),
+                        0
+                    ) AS positive_rate_30m
+                FROM signal_observations
+                GROUP BY market
+                """
+            ).fetchall()
+        return {
+            str(row["market"]): {
+                "observations": int(row["observations"]),
+                "labeled_5m": int(row["labeled_5m"]),
+                "labeled_15m": int(row["labeled_15m"]),
+                "labeled_30m": int(row["labeled_30m"]),
+                "average_return_5m": float(row["average_return_5m"]),
+                "average_return_15m": float(row["average_return_15m"]),
+                "average_return_30m": float(row["average_return_30m"]),
+                "positive_rate_30m": float(row["positive_rate_30m"]) * 100,
+            }
+            for row in rows
+        }
+
+    def learning_readiness(self, min_samples: int = 200) -> dict[str, dict[str, int | bool]]:
+        required = max(int(min_samples), 1)
+        return {
+            market: {
+                "labeled_samples": int(summary["labeled_30m"]),
+                "required_samples": required,
+                "remaining_samples": max(required - int(summary["labeled_30m"]), 0),
+                "ready": int(summary["labeled_30m"]) >= required,
+            }
+            for market, summary in self.signal_summary_by_market().items()
+        }
+
+    def export_training_dataset(self, output_path: str | Path) -> int:
+        destination = Path(output_path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        columns = [
+            "symbol",
+            "market",
+            "exchange",
+            "observed_at",
+            "price",
+            "change_pct",
+            "volume_ratio",
+            "trading_value_krw",
+            "one_minute_change_pct",
+            "five_minute_change_pct",
+            "breakout_pct",
+            "vwap_extension_pct",
+            "confirmation_bars",
+            "score",
+            "return_5m",
+            "return_15m",
+            "return_30m",
+        ]
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT {", ".join(columns)}
+                FROM signal_observations
+                WHERE return_5m IS NOT NULL
+                  AND return_15m IS NOT NULL
+                  AND return_30m IS NOT NULL
+                ORDER BY observed_epoch
+                """
+            ).fetchall()
+        with destination.open("w", encoding="utf-8", newline="") as output:
+            writer = csv.DictWriter(output, fieldnames=columns)
+            writer.writeheader()
+            writer.writerows(dict(row) for row in rows)
+        return len(rows)
 
     def _initialize(self) -> None:
         with self._connect() as connection:

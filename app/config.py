@@ -66,6 +66,14 @@ class Settings(BaseSettings):
     auto_trading_enabled: bool = False
     scan_interval_seconds: int = 60
     scan_candidate_limit: int = 5
+    dynamic_universe_enabled: bool = True
+    dynamic_universe_refresh_seconds: int = 300
+    dynamic_kr_symbol_limit: int = 20
+    dynamic_us_symbol_limit_per_exchange: int = 10
+    dynamic_us_exchanges: str = "NAS,NYS,AMS"
+    market_holiday_check_enabled: bool = True
+    market_holiday_cache_seconds: int = 21600
+    learning_min_labeled_samples: int = 200
     us_scan_batch_size: int = 20
     kr_scan_batch_size: int = 10
     us_scan_symbols: str = (

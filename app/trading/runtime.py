@@ -12,6 +12,8 @@ from app.scanners.momentum import (
     parse_exchange_map,
     parse_symbol_list,
 )
+from app.scanners.universe import DynamicUniverseProvider, parse_exchanges
+from app.trading.calendar import MarketCalendar
 from app.trading.executor import ExecutionConfig, ExecutionResult, TradingExecutor
 from app.trading.journal import SignalRecord, TradeJournal
 from app.trading.sessions import SessionPolicy, active_markets, market_closed_reason
@@ -40,6 +42,21 @@ class TradingRuntime:
             rules=self.rules,
             exchange=settings.us_order_exchange,
             request_delay_seconds=settings.quote_request_delay_seconds,
+        )
+        self.universe = DynamicUniverseProvider(
+            self.client,
+            enabled=getattr(settings, "dynamic_universe_enabled", True),
+            refresh_seconds=getattr(settings, "dynamic_universe_refresh_seconds", 300),
+            kr_limit=getattr(settings, "dynamic_kr_symbol_limit", 20),
+            us_limit_per_exchange=getattr(settings, "dynamic_us_symbol_limit_per_exchange", 10),
+            us_exchanges=parse_exchanges(
+                getattr(settings, "dynamic_us_exchanges", "NAS,NYS,AMS")
+            ),
+        )
+        self.calendar = MarketCalendar(
+            self.client,
+            enabled=getattr(settings, "market_holiday_check_enabled", True),
+            cache_seconds=getattr(settings, "market_holiday_cache_seconds", 21600),
         )
         self.journal = TradeJournal(settings.trade_journal_path)
         self.executor = TradingExecutor(
@@ -83,7 +100,13 @@ class TradingRuntime:
 
     def run_once(self) -> list[ExecutionResult]:
         candidates = []
-        active = active_markets(self.session_policy, us_session=self.settings.us_order_session)
+        now = datetime.now(KST)
+        active = active_markets(self.session_policy, now=now, us_session=self.settings.us_order_session)
+        active = [
+            market
+            for market in active
+            if self.calendar.check(market, now).is_open
+        ]
         logger.info("scan cycle active_markets=%s", ",".join(active) if active else "NONE")
         results = self._sync_holdings_if_due()
         pending_results = self.executor.reconcile_pending_orders(cancel_markets=set(active))
@@ -101,14 +124,17 @@ class TradingRuntime:
         results.extend(self._monitor_open_positions(active))
         pending_symbols = {item.symbol for item in self.store.load_pending_orders()}
         excluded_symbols = positions_at_cycle_start | set(self.store.load()) | pending_symbols
-        us_symbols = self._next_us_symbols() if "US" in active else []
-        kr_symbols = self._next_kr_symbols() if "KR" in active else []
+        us_symbols, us_exchange_map, us_name_map = (
+            self._next_us_universe() if "US" in active else ([], {}, {})
+        )
+        kr_symbols = self._next_kr_universe() if "KR" in active else []
         if us_symbols:
             candidates.extend(
                 self.scanner.scan_us(
                     [symbol for symbol in us_symbols if symbol not in excluded_symbols],
                     limit=self.settings.scan_candidate_limit,
-                    exchange_by_symbol=self._us_exchange_map(),
+                    exchange_by_symbol=us_exchange_map,
+                    name_by_symbol=us_name_map,
                 )
             )
         if kr_symbols:
@@ -290,7 +316,11 @@ class TradingRuntime:
 
     def _can_trade(self, market: str) -> bool:
         session = self.settings.us_order_session if market.upper() == "US" else "regular"
-        return self.session_policy.is_market_open(market, session=session)
+        now = datetime.now(KST)
+        return (
+            self.session_policy.is_market_open(market, now=now, session=session)
+            and self.calendar.check(market, now).is_open
+        )
 
     def _us_symbols(self) -> list[str]:
         symbols = parse_symbol_list(self.settings.us_scan_symbols)
@@ -318,6 +348,34 @@ class TradingRuntime:
             self._kr_symbols(),
             self._kr_cursor,
             self.settings.kr_scan_batch_size,
+        )
+        return symbols
+
+    def _next_us_universe(self) -> tuple[list[str], dict[str, str], dict[str, str]]:
+        selection = self.universe.select_us(self._us_symbols(), self._us_exchange_map())
+        symbols, self._us_cursor = _next_batch(
+            selection.symbols,
+            self._us_cursor,
+            self.settings.us_scan_batch_size,
+        )
+        logger.info(
+            "universe market=US source=%s symbols=%s",
+            selection.source,
+            len(symbols),
+        )
+        return symbols, selection.exchange_by_symbol, selection.name_by_symbol
+
+    def _next_kr_universe(self) -> list[str]:
+        selection = self.universe.select_kr(self._kr_symbols())
+        symbols, self._kr_cursor = _next_batch(
+            selection.symbols,
+            self._kr_cursor,
+            self.settings.kr_scan_batch_size,
+        )
+        logger.info(
+            "universe market=KR source=%s symbols=%s",
+            selection.source,
+            len(symbols),
         )
         return symbols
 

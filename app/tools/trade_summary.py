@@ -27,6 +27,18 @@ def main() -> None:
             **signals
         )
     )
+    readiness = journal.learning_readiness(settings.learning_min_labeled_samples)
+    if not readiness:
+        print(
+            f"learning_ready=false labeled_samples=0 "
+            f"required_samples={settings.learning_min_labeled_samples}"
+        )
+    for market, item in readiness.items():
+        print(
+            f"{market} learning_ready={str(item['ready']).lower()} "
+            f"labeled_samples={item['labeled_samples']} "
+            f"remaining_samples={item['remaining_samples']}"
+        )
 
 
 if __name__ == "__main__":

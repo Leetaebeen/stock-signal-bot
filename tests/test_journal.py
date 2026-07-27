@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-from app.trading.journal import FillRecord, SignalRecord, TradeJournal
+from app.trading.journal import FillRecord, SignalLabelTask, SignalRecord, TradeJournal
 from app.trading.strategy import KST
 
 
@@ -157,3 +157,47 @@ def test_trade_journal_labels_signal_only_inside_target_window(tmp_path):
     assert summary["observations"] == 1
     assert summary["labeled_5m"] == 1
     assert summary["average_return_5m"] == 3
+
+
+def test_journal_reports_learning_readiness_and_exports_complete_rows(tmp_path):
+    journal = TradeJournal(tmp_path / "trades.db")
+    observed_at = datetime(2026, 7, 25, 22, 30, tzinfo=KST)
+    observation_id = journal.record_signal(
+        SignalRecord(
+            symbol="NVDA",
+            name="NVIDIA",
+            market="US",
+            exchange="NAS",
+            observed_at=observed_at,
+            price=100,
+            change_pct=6,
+            volume_ratio=5,
+            trading_value_krw=5_000_000_000,
+            one_minute_change_pct=0.5,
+            five_minute_change_pct=1.5,
+            breakout_pct=0.4,
+            vwap_extension_pct=0.8,
+            confirmation_bars=12,
+            score=78,
+            source="test",
+            strategy_action="BUY",
+            strategy_reason="strong",
+            execution_action="SUBMITTED",
+            execution_reason="accepted",
+        )
+    )
+    for horizon, price in ((5, 101), (15, 102), (30, 103)):
+        assert journal.update_signal_label(
+            SignalLabelTask(observation_id, "NVDA", "US", "NAS", 100, horizon),
+            current_price=price,
+            labeled_at=observed_at + timedelta(minutes=horizon),
+        )
+
+    readiness = journal.learning_readiness(min_samples=2)
+    output = tmp_path / "training.csv"
+
+    assert readiness["US"]["labeled_samples"] == 1
+    assert readiness["US"]["remaining_samples"] == 1
+    assert readiness["US"]["ready"] is False
+    assert journal.export_training_dataset(output) == 1
+    assert "return_30m" in output.read_text(encoding="utf-8")

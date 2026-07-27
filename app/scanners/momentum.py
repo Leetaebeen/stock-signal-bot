@@ -69,16 +69,24 @@ class MomentumScanner:
         symbols: Iterable[str],
         limit: int = 5,
         exchange_by_symbol: dict[str, str] | None = None,
+        name_by_symbol: dict[str, str] | None = None,
     ) -> list[ScanCandidate]:
         return self._scan(
             symbols,
             market="US",
             limit=limit,
             exchange_by_symbol=exchange_by_symbol or {},
+            name_by_symbol=name_by_symbol or {},
         )
 
     def scan_kr(self, symbols: Iterable[str], limit: int = 5) -> list[ScanCandidate]:
-        return self._scan(symbols, market="KR", limit=limit, exchange_by_symbol={})
+        return self._scan(
+            symbols,
+            market="KR",
+            limit=limit,
+            exchange_by_symbol={},
+            name_by_symbol={},
+        )
 
     def _scan(
         self,
@@ -87,6 +95,7 @@ class MomentumScanner:
         market: str,
         limit: int,
         exchange_by_symbol: dict[str, str],
+        name_by_symbol: dict[str, str],
     ) -> list[ScanCandidate]:
         preliminary: list[MarketSignal] = []
         observed_at = datetime.now(KST)
@@ -97,7 +106,11 @@ class MomentumScanner:
                     snapshot = self.quote_client.get_domestic_price(symbol)
                 else:
                     exchange = exchange_by_symbol.get(symbol, self.exchange)
-                    snapshot = self.quote_client.get_overseas_price(symbol, exchange=exchange)
+                    snapshot = self.quote_client.get_overseas_price(
+                        symbol,
+                        exchange=exchange,
+                        name=name_by_symbol.get(symbol),
+                    )
             except Exception as exc:
                 logger.warning("quote skipped symbol=%s reason=%s", symbol, exc)
                 continue

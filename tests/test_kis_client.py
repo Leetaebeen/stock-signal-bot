@@ -1,9 +1,93 @@
 import json
+from datetime import datetime
 
 import httpx
 
 from app.brokers import kis_client as kis_client_module
 from app.brokers.kis_client import KisClient, summarize_domestic_balance
+
+
+def test_get_domestic_ranked_symbols_maps_output(tmp_path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth2/tokenP":
+            return httpx.Response(200, json={"access_token": "token", "token_type": "Bearer", "expires_in": 3600})
+        if request.url.path == "/uapi/domestic-stock/v1/quotations/volume-rank":
+            assert request.headers["tr_id"] == "FHPST01710000"
+            assert request.url.params["FID_BLNG_CLS_CODE"] == "3"
+            return httpx.Response(
+                200,
+                json={"rt_cd": "0", "output": [{"mksc_shrn_iscd": "005930", "hts_kor_isnm": "Samsung"}]},
+            )
+        return httpx.Response(404)
+
+    client = KisClient(
+        app_key="app-key",
+        app_secret="app-secret",
+        env="paper",
+        token_cache_path=str(tmp_path / "token.json"),
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    ranked = client.get_domestic_ranked_symbols()
+
+    assert ranked[0].symbol == "005930"
+    assert ranked[0].market == "KR"
+
+
+def test_get_overseas_ranked_symbols_maps_output(tmp_path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth2/tokenP":
+            return httpx.Response(200, json={"access_token": "token", "token_type": "Bearer", "expires_in": 3600})
+        if request.url.path == "/uapi/overseas-stock/v1/ranking/updown-rate":
+            assert request.headers["tr_id"] == "HHDFS76290000"
+            assert request.url.params["VOL_RANG"] == "4"
+            return httpx.Response(
+                200,
+                json={"rt_cd": "0", "output2": [{"symb": "NVDA", "name": "NVIDIA"}]},
+            )
+        return httpx.Response(404)
+
+    client = KisClient(
+        app_key="app-key",
+        app_secret="app-secret",
+        env="paper",
+        token_cache_path=str(tmp_path / "token.json"),
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    ranked = client.get_overseas_ranked_symbols("NAS")
+
+    assert ranked[0].symbol == "NVDA"
+    assert ranked[0].exchange == "NAS"
+
+
+def test_market_business_day_maps_domestic_and_us_outputs(tmp_path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/oauth2/tokenP":
+            return httpx.Response(200, json={"access_token": "token", "token_type": "Bearer", "expires_in": 3600})
+        if request.url.path.endswith("/chk-holiday"):
+            return httpx.Response(
+                200,
+                json={"rt_cd": "0", "output": [{"bass_dt": "20260727", "opnd_yn": "Y"}]},
+            )
+        if request.url.path.endswith("/countries-holiday"):
+            return httpx.Response(
+                200,
+                json={"rt_cd": "0", "output": [{"trad_dt": "20260727", "tr_day_yn": "N"}]},
+            )
+        return httpx.Response(404)
+
+    client = KisClient(
+        app_key="app-key",
+        app_secret="app-secret",
+        env="paper",
+        token_cache_path=str(tmp_path / "token.json"),
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    target = datetime(2026, 7, 27)
+
+    assert client.is_market_business_day("KR", target) is True
+    assert client.is_market_business_day("US", target) is False
 
 
 def test_get_domestic_price_maps_kis_output(tmp_path):

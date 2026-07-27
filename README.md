@@ -10,6 +10,9 @@
 - 모의투자 국내/미국 잔고 조회 및 로컬 상태 동기화
 - 국내/해외 현재가 조회
 - 국내/해외 1분봉 조회
+- 국내 거래대금 순위와 미국 거래량 10만 주 이상 상승률 순위 기반 동적 후보 수집
+- 순위 API 장애 시 설정된 종목 목록으로 자동 복귀 및 5분 캐시
+- 국내·미국 휴장일 조회와 장 진입 차단
 - 국내/해외 모의 주문 및 실제 체결 조회
 - 매수 직전 국내/해외 주문 가능 수량 검증
 - 120초 이상 미체결 주문 자동 취소 및 최대 3회 재확인
@@ -17,6 +20,7 @@
 - 시장별 최근 24시간 매수 3회·실현손실 한도 및 종목 재진입 대기
 - 후보 신호의 전략 지표와 실행 결과 저장
 - 신호 발생 5·15·30분 후 수익률 자동 라벨링
+- 시장별 학습 준비도 집계와 완료 라벨 CSV 내보내기
 - 종목별 NASDAQ/NYSE 거래소 라우팅
 - 분봉 거래량, 1분·5분 상승률, 고점 돌파, VWAP 이격 기반 진입
 - 익절, 손절, 트레일링 스톱, 최대 보유시간 청산
@@ -72,6 +76,8 @@ python -m app.tools.kis_quote_check 005930 --market KR --name 삼성전자
 python -m app.tools.kis_quote_check NVDA --market US --exchange NAS --name NVIDIA
 python -m app.tools.telegram_test
 python -m app.tools.trade_summary
+python -m app.tools.execution_audit
+python -m app.tools.training_export
 python -m app.tools.kis_buying_power_check KR 005930 78000
 python -m app.tools.kis_buying_power_check US NVDA 144.2 --exchange NAS
 python -m app.tools.request_liquidation 005930 --market KR
