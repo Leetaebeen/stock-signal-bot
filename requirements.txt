@@ -3,3 +3,4 @@ holidays>=0.76,<1.0
 pydantic-settings>=2.4.0
 python-dotenv>=1.0.0
 pytest>=8.0.0
+tzdata>=2025.2

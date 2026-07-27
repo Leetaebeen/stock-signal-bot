@@ -1,10 +1,10 @@
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 
 KST = timezone(timedelta(hours=9), name="KST")
-US_EASTERN_STANDARD = timezone(timedelta(hours=-5), name="EST")
-US_EASTERN_DAYLIGHT = timezone(timedelta(hours=-4), name="EDT")
+NEW_YORK = ZoneInfo("America/New_York")
 
 
 @dataclass(frozen=True)
@@ -40,17 +40,17 @@ def is_kr_regular_open(now: datetime | None = None) -> bool:
     current = _as_kst(now or datetime.now(KST))
     if current.weekday() >= 5:
         return False
-    return time(8, 0) <= current.time() <= time(16, 0)
+    return time(9, 0) <= current.time() < time(15, 30)
 
 
 def is_us_regular_open(now: datetime | None = None) -> bool:
-    current = _as_kst(now or datetime.now(KST))
-    current_time = current.time()
-    if current_time >= time(22, 30):
-        return current.weekday() <= 4
-    if current_time <= time(5, 0):
-        return 1 <= current.weekday() <= 5
-    return False
+    current = now or datetime.now(KST)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=KST)
+    eastern = current.astimezone(NEW_YORK)
+    if eastern.weekday() >= 5:
+        return False
+    return time(9, 30) <= eastern.time() < time(16, 0)
 
 
 def is_us_extended_open(now: datetime | None = None, session: str = "regular") -> bool:

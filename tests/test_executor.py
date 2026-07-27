@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import datetime, timedelta
 
 from app.brokers.kis_client import (
@@ -142,6 +143,23 @@ def test_executor_blocks_new_entry_when_max_open_positions_reached(tmp_path):
     assert second.action == "HOLD"
     assert "매수대기" in second.reason
     assert len(broker.orders) == 1
+
+
+def test_executor_applies_max_open_positions_per_market(tmp_path):
+    broker = FakeBroker()
+    executor = _executor(tmp_path, broker=broker)
+    observed_at = datetime.now(KST)
+
+    us_result = executor.handle_signal(
+        _strong_signal("HOOD", "Robinhood", "US", observed_at=observed_at)
+    )
+    kr_result = executor.handle_signal(
+        _strong_signal("005930", "Samsung Electronics", "KR", price=78000, observed_at=observed_at)
+    )
+
+    assert us_result.action == "SUBMITTED"
+    assert kr_result.action == "SUBMITTED"
+    assert len(broker.orders) == 2
 
 
 def test_executor_blocks_entry_when_buying_power_is_insufficient(tmp_path):
@@ -381,6 +399,34 @@ def test_executor_auto_cancels_stale_pending_order_once(tmp_path):
     assert len(broker.cancellations) == 1
     assert executor.store.load_pending_orders()[0].cancel_requested_at is not None
     assert executor.store.load_pending_orders()[0].cancel_attempts == 1
+
+
+def test_executor_retries_cancel_after_initial_attempt_limit(tmp_path):
+    broker = FakeBroker()
+    broker.fill_state = "PENDING"
+    executor = _executor(tmp_path, broker=broker)
+    executor.handle_signal(
+        _strong_signal(
+            "005930",
+            "Samsung Electronics",
+            "KR",
+            price=78000,
+            observed_at=datetime.now(KST) - timedelta(minutes=30),
+        )
+    )
+    pending = executor.store.load_pending_orders()[0]
+    executor.store.add_pending_order(
+        replace(
+            pending,
+            cancel_requested_at=datetime.now(KST) - timedelta(minutes=11),
+            cancel_attempts=executor.config.cancel_max_attempts,
+        )
+    )
+
+    result = executor.reconcile_pending_orders()[0]
+
+    assert result.action == "CANCEL_SUBMITTED"
+    assert len(broker.cancellations) == 1
 
 
 def test_executor_does_not_cancel_stale_order_when_market_is_closed(tmp_path):

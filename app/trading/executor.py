@@ -164,12 +164,21 @@ class TradingExecutor:
         decision = evaluate_entry(signal, self.rules)
         if not decision.should_buy:
             return ExecutionResult("HOLD", signal.symbol, decision.reason)
-        pending_buys = sum(1 for item in self.store.load_pending_orders() if item.side.lower() == "buy")
-        if self.config.max_open_positions > 0 and len(positions) + pending_buys >= self.config.max_open_positions:
+        market = signal.market.strip().upper()
+        market_positions = sum(
+            1 for item in positions.values() if item.market.strip().upper() == market
+        )
+        pending_buys = sum(
+            1
+            for item in self.store.load_pending_orders()
+            if item.side.lower() == "buy" and item.market.strip().upper() == market
+        )
+        market_exposure = market_positions + pending_buys
+        if self.config.max_open_positions > 0 and market_exposure >= self.config.max_open_positions:
             return ExecutionResult(
                 "HOLD",
                 signal.symbol,
-                f"최대 보유·매수대기 종목 수 도달: {len(positions) + pending_buys}/{self.config.max_open_positions}",
+                f"{market} 최대 보유·매수대기 종목 수 도달: {market_exposure}/{self.config.max_open_positions}",
             )
 
         risk_reason = self._entry_risk_reason(signal)
@@ -376,15 +385,19 @@ class TradingExecutor:
     def _should_cancel(self, pending: PendingOrder, status: OrderFillStatus) -> bool:
         if not self.config.auto_cancel_enabled or self.config.order_timeout_seconds <= 0:
             return False
-        if pending.cancel_attempts >= self.config.cancel_max_attempts:
-            return False
         if status.state not in {"PENDING", "PARTIAL", "UNKNOWN"}:
             return False
         reference_time = pending.cancel_requested_at or pending.submitted_at
         if reference_time.tzinfo is None:
             reference_time = reference_time.replace(tzinfo=KST)
         age_seconds = (datetime.now(KST) - reference_time.astimezone(KST)).total_seconds()
-        return age_seconds >= self.config.order_timeout_seconds
+        retry_seconds = self.config.order_timeout_seconds
+        if (
+            self.config.cancel_max_attempts > 0
+            and pending.cancel_attempts >= self.config.cancel_max_attempts
+        ):
+            retry_seconds *= 5
+        return age_seconds >= retry_seconds
 
     def _request_cancel(
         self,
