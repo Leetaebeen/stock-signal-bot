@@ -5,6 +5,7 @@ from datetime import datetime
 from app.alerts.telegram import TelegramAlerter
 from app.brokers.kis_client import KisClient
 from app.config import Settings
+from app.learning.pipeline import LearningPipeline
 from app.scanners.momentum import (
     MomentumScanner,
     ScanCandidate,
@@ -59,6 +60,7 @@ class TradingRuntime:
             cache_seconds=getattr(settings, "market_holiday_cache_seconds", 21600),
         )
         self.journal = TradeJournal(settings.trade_journal_path)
+        self.learning = LearningPipeline(settings, self.journal)
         self.executor = TradingExecutor(
             broker=self.client,
             store=self.store,
@@ -107,6 +109,10 @@ class TradingRuntime:
             for market in active
             if self.calendar.check(market, now).is_open
         ]
+        try:
+            self.learning.maybe_run(now)
+        except Exception:
+            logger.exception("daily learning evaluation failed")
         logger.info("scan cycle active_markets=%s", ",".join(active) if active else "NONE")
         results = self._sync_holdings_if_due()
         pending_results = self.executor.reconcile_pending_orders(cancel_markets=set(active))

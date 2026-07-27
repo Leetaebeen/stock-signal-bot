@@ -80,6 +80,10 @@ class Settings(BaseSettings):
     model_round_trip_cost_pct: float = 0.2
     model_min_precision_pct: float = 55.0
     model_min_test_picks: int = 20
+    model_auto_evaluate_enabled: bool = True
+    model_evaluation_hour_kst: int = 17
+    model_training_dataset_path: str = "data/training_signals.csv"
+    model_output_path: str = "data/momentum_model.json"
     us_scan_batch_size: int = 20
     kr_scan_batch_size: int = 10
     us_scan_symbols: str = (
