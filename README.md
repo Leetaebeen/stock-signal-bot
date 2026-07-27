@@ -76,7 +76,7 @@ python -m app.tools.kis_quote_check 005930 --market KR --name 삼성전자
 python -m app.tools.kis_quote_check NVDA --market US --exchange NAS --name NVIDIA
 python -m app.tools.telegram_test
 python -m app.tools.trade_summary
-python -m app.tools.execution_audit
+python -m app.tools.execution_audit --broker
 python -m app.tools.training_export
 python -m app.tools.kis_buying_power_check KR 005930 78000
 python -m app.tools.kis_buying_power_check US NVDA 144.2 --exchange NAS
