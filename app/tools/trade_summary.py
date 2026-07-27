@@ -27,7 +27,11 @@ def main() -> None:
             **signals
         )
     )
-    readiness = journal.learning_readiness(settings.learning_min_labeled_samples)
+    readiness = journal.learning_readiness(
+        settings.learning_min_labeled_samples,
+        settings.learning_min_distinct_days,
+        settings.learning_min_distinct_symbols,
+    )
     if not readiness:
         print(
             f"learning_ready=false labeled_samples=0 "
@@ -37,7 +41,11 @@ def main() -> None:
         print(
             f"{market} learning_ready={str(item['ready']).lower()} "
             f"labeled_samples={item['labeled_samples']} "
-            f"remaining_samples={item['remaining_samples']}"
+            f"remaining_samples={item['remaining_samples']} "
+            f"distinct_days={item['distinct_days']} "
+            f"remaining_days={item['remaining_days']} "
+            f"distinct_symbols={item['distinct_symbols']} "
+            f"remaining_symbols={item['remaining_symbols']}"
         )
 
 

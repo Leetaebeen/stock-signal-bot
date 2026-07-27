@@ -21,6 +21,7 @@
 - 후보 신호의 전략 지표와 실행 결과 저장
 - 신호 발생 5·15·30분 후 수익률 자동 라벨링
 - 시장별 학습 준비도 집계와 완료 라벨 CSV 내보내기
+- 거래일 단위 학습·검증 분리와 비용 반영 모델 백테스트
 - 종목별 NASDAQ/NYSE 거래소 라우팅
 - 분봉 거래량, 1분·5분 상승률, 고점 돌파, VWAP 이격 기반 진입
 - 익절, 손절, 트레일링 스톱, 최대 보유시간 청산
@@ -78,6 +79,7 @@ python -m app.tools.telegram_test
 python -m app.tools.trade_summary
 python -m app.tools.execution_audit --broker
 python -m app.tools.training_export
+python -m app.tools.model_backtest
 python -m app.tools.kis_buying_power_check KR 005930 78000
 python -m app.tools.kis_buying_power_check US NVDA 144.2 --exchange NAS
 python -m app.tools.request_liquidation 005930 --market KR
@@ -119,3 +121,4 @@ python -m app.tools.kis_order_check US buy NVDA --qty 1 --price 160 --exchange N
 - 주문 접수만으로 체결 처리하지 않으며 KIS 체결 내역 확인 후 포지션과 알림을 갱신합니다.
 - 미체결 취소도 KIS 취소 완료를 확인한 뒤 로컬 상태에서 제거합니다.
 - 로컬에 없던 계좌 보유 종목은 자동 매도하지 않는 관리 제외 상태로 반영합니다.
+- 모델은 최소 20거래일 검증 기준을 통과하기 전까지 실시간 주문에 사용하지 않습니다.

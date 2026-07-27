@@ -198,6 +198,8 @@ def test_journal_reports_learning_readiness_and_exports_complete_rows(tmp_path):
 
     assert readiness["US"]["labeled_samples"] == 1
     assert readiness["US"]["remaining_samples"] == 1
+    assert readiness["US"]["distinct_days"] == 1
+    assert readiness["US"]["remaining_days"] == 19
     assert readiness["US"]["ready"] is False
     assert journal.export_training_dataset(output) == 1
     assert "return_30m" in output.read_text(encoding="utf-8")

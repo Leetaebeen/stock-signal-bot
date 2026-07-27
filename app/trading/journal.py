@@ -313,6 +313,8 @@ class TradeJournal:
                     COUNT(return_5m) AS labeled_5m,
                     COUNT(return_15m) AS labeled_15m,
                     COUNT(return_30m) AS labeled_30m,
+                    COUNT(DISTINCT substr(observed_at, 1, 10)) AS distinct_days,
+                    COUNT(DISTINCT symbol) AS distinct_symbols,
                     COALESCE(AVG(return_5m), 0) AS average_return_5m,
                     COALESCE(AVG(return_15m), 0) AS average_return_15m,
                     COALESCE(AVG(return_30m), 0) AS average_return_30m
@@ -326,6 +328,8 @@ class TradeJournal:
             "labeled_5m": int(row["labeled_5m"]),
             "labeled_15m": int(row["labeled_15m"]),
             "labeled_30m": int(row["labeled_30m"]),
+            "distinct_days": int(row["distinct_days"]),
+            "distinct_symbols": int(row["distinct_symbols"]),
             "average_return_5m": float(row["average_return_5m"]),
             "average_return_15m": float(row["average_return_15m"]),
             "average_return_30m": float(row["average_return_30m"]),
@@ -361,6 +365,8 @@ class TradeJournal:
                     COUNT(return_5m) AS labeled_5m,
                     COUNT(return_15m) AS labeled_15m,
                     COUNT(return_30m) AS labeled_30m,
+                    COUNT(DISTINCT substr(observed_at, 1, 10)) AS distinct_days,
+                    COUNT(DISTINCT symbol) AS distinct_symbols,
                     COALESCE(AVG(return_5m), 0) AS average_return_5m,
                     COALESCE(AVG(return_15m), 0) AS average_return_15m,
                     COALESCE(AVG(return_30m), 0) AS average_return_30m,
@@ -384,6 +390,8 @@ class TradeJournal:
                 "labeled_5m": int(row["labeled_5m"]),
                 "labeled_15m": int(row["labeled_15m"]),
                 "labeled_30m": int(row["labeled_30m"]),
+                "distinct_days": int(row["distinct_days"]),
+                "distinct_symbols": int(row["distinct_symbols"]),
                 "average_return_5m": float(row["average_return_5m"]),
                 "average_return_15m": float(row["average_return_15m"]),
                 "average_return_30m": float(row["average_return_30m"]),
@@ -392,14 +400,34 @@ class TradeJournal:
             for row in rows
         }
 
-    def learning_readiness(self, min_samples: int = 200) -> dict[str, dict[str, int | bool]]:
+    def learning_readiness(
+        self,
+        min_samples: int = 200,
+        min_days: int = 20,
+        min_symbols: int = 10,
+    ) -> dict[str, dict[str, int | bool]]:
         required = max(int(min_samples), 1)
+        required_days = max(int(min_days), 2)
+        required_symbols = max(int(min_symbols), 2)
         return {
             market: {
                 "labeled_samples": int(summary["labeled_30m"]),
                 "required_samples": required,
                 "remaining_samples": max(required - int(summary["labeled_30m"]), 0),
-                "ready": int(summary["labeled_30m"]) >= required,
+                "distinct_days": int(summary["distinct_days"]),
+                "required_days": required_days,
+                "remaining_days": max(required_days - int(summary["distinct_days"]), 0),
+                "distinct_symbols": int(summary["distinct_symbols"]),
+                "required_symbols": required_symbols,
+                "remaining_symbols": max(
+                    required_symbols - int(summary["distinct_symbols"]),
+                    0,
+                ),
+                "ready": (
+                    int(summary["labeled_30m"]) >= required
+                    and int(summary["distinct_days"]) >= required_days
+                    and int(summary["distinct_symbols"]) >= required_symbols
+                ),
             }
             for market, summary in self.signal_summary_by_market().items()
         }

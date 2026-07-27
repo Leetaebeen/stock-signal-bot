@@ -74,6 +74,12 @@ class Settings(BaseSettings):
     market_holiday_check_enabled: bool = True
     market_holiday_cache_seconds: int = 21600
     learning_min_labeled_samples: int = 200
+    learning_min_distinct_days: int = 20
+    learning_min_distinct_symbols: int = 10
+    model_target_return_pct: float = 0.5
+    model_round_trip_cost_pct: float = 0.2
+    model_min_precision_pct: float = 55.0
+    model_min_test_picks: int = 20
     us_scan_batch_size: int = 20
     kr_scan_batch_size: int = 10
     us_scan_symbols: str = (
