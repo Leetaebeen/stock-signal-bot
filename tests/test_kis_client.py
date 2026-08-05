@@ -477,6 +477,8 @@ def test_get_overseas_fill_status_matches_order_locally_in_paper_mode(tmp_path):
             assert request.headers["tr_id"] == "VTTS3035R"
             assert request.url.params["PDNO"] == ""
             assert request.url.params["ODNO"] == ""
+            assert request.url.params["ORD_STRT_DT"] == "20260727"
+            assert request.url.params["ORD_END_DT"] == "20260727"
             return httpx.Response(
                 200,
                 json={
@@ -510,7 +512,7 @@ def test_get_overseas_fill_status_matches_order_locally_in_paper_mode(tmp_path):
         order_no="000002",
         symbol="NVDA",
         quantity=1,
-        submitted_at=kis_client_module.datetime(2026, 7, 25, tzinfo=kis_client_module.KST),
+        submitted_at=kis_client_module.datetime(2026, 7, 28, 0, 50, tzinfo=kis_client_module.KST),
     )
 
     assert status.state == "FILLED"

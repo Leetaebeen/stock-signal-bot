@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import time
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -14,6 +15,7 @@ KIS_RATE_LIMIT_MAX_RETRIES = 2
 KIS_RATE_LIMIT_RETRY_DELAY_SECONDS = 1.2
 USD_KRW_FALLBACK = 1350.0
 KST = timezone(timedelta(hours=9))
+NEW_YORK = ZoneInfo("America/New_York")
 
 
 @dataclass(frozen=True)
@@ -332,7 +334,7 @@ class KisClient:
 
     def _get_overseas_order_rows(self, submitted_at: datetime) -> list[dict[str, Any]]:
         self._require_account()
-        order_date = _as_kst(submitted_at).strftime("%Y%m%d")
+        order_date = _as_new_york(submitted_at).strftime("%Y%m%d")
         response = self._get_with_auth_retry(
             "/uapi/overseas-stock/v1/trading/inquire-ccnl",
             tr_id="VTTS3035R" if self.env == "paper" else "TTTS3035R",
@@ -935,6 +937,12 @@ def _as_kst(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=KST)
     return value.astimezone(KST)
+
+
+def _as_new_york(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=KST)
+    return value.astimezone(NEW_YORK)
 
 
 def _order_payload_to_result(
