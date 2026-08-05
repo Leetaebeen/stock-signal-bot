@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     order_auto_cancel_enabled: bool = True
     order_timeout_seconds: int = 120
     order_cancel_max_attempts: int = 3
+    pending_order_expiry_seconds: int = 12 * 60 * 60
     trading_default_quantity: int = 1
     trading_max_open_positions: int = 1
     buying_power_check_enabled: bool = True

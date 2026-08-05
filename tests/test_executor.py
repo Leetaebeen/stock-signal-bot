@@ -449,6 +449,49 @@ def test_executor_does_not_cancel_stale_order_when_market_is_closed(tmp_path):
     assert broker.cancellations == []
 
 
+def test_executor_removes_expired_buy_when_account_has_no_holding(tmp_path):
+    broker = FakeBroker()
+    broker.fill_state = "UNKNOWN"
+    executor = _executor(tmp_path, broker=broker)
+    executor.handle_signal(
+        _strong_signal(
+            "RNG",
+            "RingCentral",
+            "US",
+            observed_at=datetime.now(KST) - timedelta(hours=13),
+        )
+    )
+
+    result = executor.reconcile_pending_orders(cancel_markets=set())[0]
+
+    assert result.action == "EXPIRED"
+    assert executor.store.load_pending_orders() == []
+    assert executor.store.load() == {}
+
+
+def test_executor_recovers_expired_buy_from_account_holding(tmp_path):
+    broker = FakeBroker()
+    broker.fill_state = "UNKNOWN"
+    broker.holdings = [
+        BrokerHolding("RNG", "RingCentral", "US", 1, 52.75, 53.00, "NYS")
+    ]
+    executor = _executor(tmp_path, broker=broker)
+    executor.handle_signal(
+        _strong_signal(
+            "RNG",
+            "RingCentral",
+            "US",
+            observed_at=datetime.now(KST) - timedelta(hours=13),
+        )
+    )
+
+    result = executor.reconcile_pending_orders(cancel_markets=set())[0]
+
+    assert result.action == "BUY"
+    assert executor.store.load_pending_orders() == []
+    assert executor.store.load()["RNG"].entry_price == 52.75
+
+
 def test_executor_reconciles_broker_holding_into_local_state(tmp_path):
     broker = FakeBroker()
     broker.holdings = [

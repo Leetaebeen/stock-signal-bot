@@ -117,6 +117,7 @@ class ExecutionConfig:
     auto_cancel_enabled: bool = True
     order_timeout_seconds: int = 120
     cancel_max_attempts: int = 3
+    pending_order_expiry_seconds: int = 12 * 60 * 60
     buying_power_check_enabled: bool = True
     max_entries_per_market_24h: int = 3
     kr_max_realized_loss_24h_krw: float = 100_000
@@ -371,6 +372,8 @@ class TradingExecutor:
                 if status.state == "REJECTED":
                     self._notify_failure(_pending_to_signal(pending), pending.side.upper(), reason)
                 results.append(ExecutionResult(status.state, pending.symbol, reason, pending.order_no))
+            elif self._is_expired_day_order(pending):
+                results.append(self._reconcile_expired_day_order(pending))
             elif (
                 cancel_markets is None
                 or pending.market.strip().upper() in cancel_markets
@@ -381,6 +384,58 @@ class TradingExecutor:
                     ExecutionResult(status.state, pending.symbol, "체결 확인 대기", pending.order_no)
                 )
         return results
+
+    def _is_expired_day_order(self, pending: PendingOrder) -> bool:
+        if self.config.pending_order_expiry_seconds <= 0:
+            return False
+        submitted_at = pending.submitted_at
+        if submitted_at.tzinfo is None:
+            submitted_at = submitted_at.replace(tzinfo=KST)
+        age_seconds = (datetime.now(KST) - submitted_at.astimezone(KST)).total_seconds()
+        return age_seconds >= self.config.pending_order_expiry_seconds
+
+    def _reconcile_expired_day_order(self, pending: PendingOrder) -> ExecutionResult:
+        try:
+            holdings = self.broker.get_holdings(pending.market)
+        except Exception as exc:
+            logger.warning(
+                "expired order holding inquiry failed order_no=%s symbol=%s reason=%s",
+                pending.order_no,
+                pending.symbol,
+                exc,
+            )
+            return ExecutionResult("PENDING", pending.symbol, str(exc), pending.order_no)
+
+        holding = next(
+            (item for item in holdings if item.symbol.strip().upper() == pending.symbol.strip().upper()),
+            None,
+        )
+        if pending.side.lower() == "buy" and holding and holding.quantity > 0:
+            fill_price = holding.average_price or holding.current_price or pending.requested_price
+            recovered = OrderFillStatus(
+                state="FILLED",
+                filled_quantity=min(float(pending.quantity), float(holding.quantity)),
+                average_price=float(fill_price),
+                raw={"reconciled_from": "holding"},
+            )
+            return self._apply_confirmed_fill(pending, recovered)
+
+        self.store.remove_pending_order(pending.order_no)
+        if pending.side.lower() == "sell":
+            try:
+                self.reconcile_holdings(pending.market)
+            except Exception as exc:
+                logger.warning(
+                    "expired sell holding reconciliation failed order_no=%s symbol=%s reason=%s",
+                    pending.order_no,
+                    pending.symbol,
+                    exc,
+                )
+            reason = "만료된 매도 주문을 계좌 보유내역과 동기화"
+        else:
+            reason = "만료된 매수 주문을 미체결로 정리"
+        self._notify_failure(_pending_to_signal(pending), pending.side.upper(), reason)
+        return ExecutionResult("EXPIRED", pending.symbol, reason, pending.order_no)
 
     def _should_cancel(self, pending: PendingOrder, status: OrderFillStatus) -> bool:
         if not self.config.auto_cancel_enabled or self.config.order_timeout_seconds <= 0:
