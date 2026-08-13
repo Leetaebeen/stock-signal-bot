@@ -45,6 +45,9 @@ class MarketSignal:
     breakout_pct: float = 0.0
     vwap_extension_pct: float = 0.0
     confirmation_bars: int = 0
+    volume_acceleration: float = 0.0
+    pullback_depth_pct: float = 0.0
+    rebreak_pct: float = 0.0
 
 
 @dataclass(frozen=True)

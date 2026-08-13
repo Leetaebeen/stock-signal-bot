@@ -96,6 +96,9 @@ def _signal_features(signal: MarketSignal, score: float) -> tuple[float, ...]:
         float(signal.five_minute_change_pct),
         float(signal.breakout_pct),
         float(signal.vwap_extension_pct),
+        float(signal.volume_acceleration),
+        float(signal.pullback_depth_pct),
+        float(signal.rebreak_pct),
         float(signal.confirmation_bars),
         float(score),
     )

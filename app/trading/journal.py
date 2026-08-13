@@ -65,6 +65,10 @@ class SignalRecord:
     strategy_reason: str
     execution_action: str
     execution_reason: str
+    volume_acceleration: float = 0.0
+    pullback_depth_pct: float = 0.0
+    rebreak_pct: float = 0.0
+    feature_version: int = 2
 
     @property
     def observation_key(self) -> str:
@@ -193,8 +197,9 @@ class TradeJournal:
                     trading_value_krw, one_minute_change_pct, five_minute_change_pct,
                     breakout_pct, vwap_extension_pct, confirmation_bars, score,
                     source, strategy_action, strategy_reason,
-                    execution_action, execution_reason
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    execution_action, execution_reason, volume_acceleration,
+                    pullback_depth_pct, rebreak_pct, feature_version
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     signal.observation_key,
@@ -219,6 +224,10 @@ class TradeJournal:
                     signal.strategy_reason,
                     signal.execution_action.upper(),
                     signal.execution_reason,
+                    signal.volume_acceleration,
+                    signal.pullback_depth_pct,
+                    signal.rebreak_pct,
+                    signal.feature_version,
                 ),
             )
             row = connection.execute(
@@ -381,6 +390,7 @@ class TradeJournal:
                         0
                     ) AS positive_rate_30m
                 FROM signal_observations
+                WHERE feature_version >= 2
                 GROUP BY market
                 """
             ).fetchall()
@@ -448,6 +458,9 @@ class TradeJournal:
             "five_minute_change_pct",
             "breakout_pct",
             "vwap_extension_pct",
+            "volume_acceleration",
+            "pullback_depth_pct",
+            "rebreak_pct",
             "confirmation_bars",
             "score",
             "return_5m",
@@ -459,7 +472,8 @@ class TradeJournal:
                 f"""
                 SELECT {", ".join(columns)}
                 FROM signal_observations
-                WHERE return_5m IS NOT NULL
+                WHERE feature_version >= 2
+                  AND return_5m IS NOT NULL
                   AND return_15m IS NOT NULL
                   AND return_30m IS NOT NULL
                 ORDER BY observed_epoch
@@ -515,6 +529,10 @@ class TradeJournal:
                     five_minute_change_pct REAL NOT NULL,
                     breakout_pct REAL NOT NULL,
                     vwap_extension_pct REAL NOT NULL,
+                    volume_acceleration REAL,
+                    pullback_depth_pct REAL,
+                    rebreak_pct REAL,
+                    feature_version INTEGER NOT NULL DEFAULT 2,
                     confirmation_bars INTEGER NOT NULL,
                     score REAL NOT NULL,
                     source TEXT NOT NULL,
@@ -531,6 +549,21 @@ class TradeJournal:
                 )
                 """
             )
+            existing_columns = {
+                str(row["name"])
+                for row in connection.execute("PRAGMA table_info(signal_observations)").fetchall()
+            }
+            migrations = (
+                ("volume_acceleration", "REAL"),
+                ("pullback_depth_pct", "REAL"),
+                ("rebreak_pct", "REAL"),
+                ("feature_version", "INTEGER NOT NULL DEFAULT 1"),
+            )
+            for column, definition in migrations:
+                if column not in existing_columns:
+                    connection.execute(
+                        f"ALTER TABLE signal_observations ADD COLUMN {column} {definition}"
+                    )
             connection.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_signal_observations_due

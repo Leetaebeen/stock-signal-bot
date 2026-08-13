@@ -48,6 +48,9 @@ class MinuteMomentum:
     breakout_pct: float
     vwap_extension_pct: float
     confirmation_bars: int
+    volume_acceleration: float
+    pullback_depth_pct: float
+    rebreak_pct: float
 
 
 class MomentumScanner:
@@ -153,6 +156,9 @@ class MomentumScanner:
                 breakout_pct=momentum.breakout_pct,
                 vwap_extension_pct=momentum.vwap_extension_pct,
                 confirmation_bars=momentum.confirmation_bars,
+                volume_acceleration=momentum.volume_acceleration,
+                pullback_depth_pct=momentum.pullback_depth_pct,
+                rebreak_pct=momentum.rebreak_pct,
             )
             candidates.append(
                 ScanCandidate(
@@ -209,7 +215,17 @@ def analyze_minute_momentum(current_price: float, bars: list[MinuteBar]) -> Minu
         latest_session = ordered[-1].timestamp[:8]
         ordered = [bar for bar in ordered if bar.timestamp[:8] == latest_session]
     if len(ordered) < 8 or current_price <= 0:
-        return MinuteMomentum(0.0, 0.0, 0.0, 0.0, 0.0, len(ordered))
+        return MinuteMomentum(
+            relative_volume=0.0,
+            one_minute_change_pct=0.0,
+            five_minute_change_pct=0.0,
+            breakout_pct=0.0,
+            vwap_extension_pct=0.0,
+            confirmation_bars=len(ordered),
+            volume_acceleration=0.0,
+            pullback_depth_pct=0.0,
+            rebreak_pct=0.0,
+        )
 
     completed = ordered[-2]
     previous = ordered[-3]
@@ -219,9 +235,27 @@ def analyze_minute_momentum(current_price: float, bars: list[MinuteBar]) -> Minu
     baseline_volume = median(baseline_volumes) if baseline_volumes else 0.0
     relative_volume = completed.volume / baseline_volume if baseline_volume > 0 else 0.0
 
+    acceleration_bars = ordered[max(0, len(ordered) - 6) : -2]
+    acceleration_volumes = [bar.volume for bar in acceleration_bars if bar.volume > 0]
+    acceleration_baseline = median(acceleration_volumes) if acceleration_volumes else 0.0
+    volume_acceleration = (
+        completed.volume / acceleration_baseline if acceleration_baseline > 0 else 0.0
+    )
+
     breakout_window = ordered[-7:-2]
     previous_high = max((bar.high for bar in breakout_window if bar.high > 0), default=0.0)
     breakout_pct = _percent_change(current_price, previous_high) if previous_high > 0 else 0.0
+
+    rebreak_window = ordered[-8:-3]
+    rebreak_reference = max((bar.high for bar in rebreak_window if bar.high > 0), default=0.0)
+    pullback_depth_pct = 0.0
+    rebreak_pct = 0.0
+    if rebreak_reference > 0:
+        pullback_depth_pct = max(
+            ((rebreak_reference - completed.low) / rebreak_reference) * 100,
+            0.0,
+        )
+        rebreak_pct = _percent_change(current_price, rebreak_reference)
 
     vwap_bars = ordered[-7:-1]
     vwap_volume = sum(bar.volume for bar in vwap_bars if bar.volume > 0)
@@ -237,6 +271,9 @@ def analyze_minute_momentum(current_price: float, bars: list[MinuteBar]) -> Minu
         breakout_pct=breakout_pct,
         vwap_extension_pct=_percent_change(current_price, vwap),
         confirmation_bars=len(ordered),
+        volume_acceleration=volume_acceleration,
+        pullback_depth_pct=pullback_depth_pct,
+        rebreak_pct=rebreak_pct,
     )
 
 

@@ -46,6 +46,28 @@ def test_minute_momentum_uses_completed_bar_volume_and_breakout():
     assert momentum.breakout_pct > 0
     assert 0 <= momentum.vwap_extension_pct < 2.5
     assert momentum.confirmation_bars == 12
+    assert momentum.volume_acceleration == 5.0
+    assert momentum.pullback_depth_pct == 0.0
+    assert momentum.rebreak_pct > 0
+
+
+def test_minute_momentum_measures_pullback_and_rebreak():
+    bars = _strong_bars()
+    completed = bars[-2]
+    bars[-2] = MinuteBar(
+        timestamp=completed.timestamp,
+        open=101.0,
+        high=101.2,
+        low=100.4,
+        close=100.8,
+        volume=5000,
+    )
+
+    momentum = analyze_minute_momentum(101.2, bars)
+
+    assert momentum.pullback_depth_pct > 0
+    assert momentum.rebreak_pct > 0
+    assert momentum.volume_acceleration == 5.0
 
 
 def test_minute_momentum_does_not_mix_previous_session_bars():
@@ -75,6 +97,8 @@ def test_momentum_scanner_confirms_candidate_with_minute_bars_and_exchange():
 
     assert [candidate.signal.symbol for candidate in candidates] == ["IONQ"]
     assert candidates[0].signal.volume_ratio == 5.0
+    assert candidates[0].signal.volume_acceleration == 5.0
+    assert candidates[0].signal.rebreak_pct > 0
     assert candidates[0].signal.confirmation_bars == 12
     assert candidates[0].source == "kis_us_minute_confirmed"
     assert client.requested_exchanges["IONQ"] == "NYS"

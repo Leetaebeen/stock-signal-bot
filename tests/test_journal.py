@@ -1,4 +1,6 @@
+import csv
 from datetime import datetime, timedelta
+import sqlite3
 
 from app.trading.journal import FillRecord, SignalLabelTask, SignalRecord, TradeJournal
 from app.trading.strategy import KST
@@ -138,6 +140,9 @@ def test_trade_journal_labels_signal_only_inside_target_window(tmp_path):
             strategy_reason="strong",
             execution_action="SUBMITTED",
             execution_reason="accepted",
+            volume_acceleration=4.5,
+            pullback_depth_pct=0.6,
+            rebreak_pct=0.3,
         )
     )
 
@@ -184,6 +189,9 @@ def test_journal_reports_learning_readiness_and_exports_complete_rows(tmp_path):
             strategy_reason="strong",
             execution_action="SUBMITTED",
             execution_reason="accepted",
+            volume_acceleration=4.5,
+            pullback_depth_pct=0.6,
+            rebreak_pct=0.3,
         )
     )
     for horizon, price in ((5, 101), (15, 102), (30, 103)):
@@ -202,4 +210,43 @@ def test_journal_reports_learning_readiness_and_exports_complete_rows(tmp_path):
     assert readiness["US"]["remaining_days"] == 19
     assert readiness["US"]["ready"] is False
     assert journal.export_training_dataset(output) == 1
-    assert "return_30m" in output.read_text(encoding="utf-8")
+    with output.open(encoding="utf-8", newline="") as source:
+        row = next(csv.DictReader(source))
+    assert float(row["volume_acceleration"]) == 4.5
+    assert float(row["pullback_depth_pct"]) == 0.6
+    assert float(row["rebreak_pct"]) == 0.3
+
+
+def test_journal_migrates_legacy_signals_to_feature_version_one(tmp_path):
+    database = tmp_path / "legacy.db"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """
+            CREATE TABLE signal_observations (
+                id INTEGER PRIMARY KEY,
+                observed_epoch INTEGER NOT NULL,
+                market TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            "INSERT INTO signal_observations (id, observed_epoch, market) VALUES (1, 1, 'US')"
+        )
+
+    TradeJournal(database)
+
+    with sqlite3.connect(database) as connection:
+        columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(signal_observations)").fetchall()
+        }
+        version = connection.execute(
+            "SELECT feature_version FROM signal_observations WHERE id = 1"
+        ).fetchone()[0]
+    assert {
+        "volume_acceleration",
+        "pullback_depth_pct",
+        "rebreak_pct",
+        "feature_version",
+    }.issubset(columns)
+    assert version == 1

@@ -13,6 +13,9 @@ FEATURE_NAMES = (
     "five_minute_change_pct",
     "breakout_pct",
     "vwap_extension_pct",
+    "volume_acceleration",
+    "pullback_depth_pct",
+    "rebreak_pct",
     "confirmation_bars",
     "score",
 )
@@ -242,6 +245,9 @@ def load_samples(dataset_path: str | Path) -> list[TrainingSample]:
                     float(row["five_minute_change_pct"]),
                     float(row["breakout_pct"]),
                     float(row["vwap_extension_pct"]),
+                    float(row["volume_acceleration"]),
+                    float(row["pullback_depth_pct"]),
+                    float(row["rebreak_pct"]),
                     float(row["confirmation_bars"]),
                     float(row["score"]),
                 )

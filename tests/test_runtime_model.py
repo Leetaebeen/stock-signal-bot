@@ -61,5 +61,8 @@ def _signal() -> MarketSignal:
         five_minute_change_pct=1.5,
         breakout_pct=0.4,
         vwap_extension_pct=0.8,
+        volume_acceleration=4.5,
+        pullback_depth_pct=0.6,
+        rebreak_pct=0.3,
         confirmation_bars=12,
     )
