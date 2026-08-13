@@ -401,7 +401,7 @@ def test_executor_auto_cancels_stale_pending_order_once(tmp_path):
     assert executor.store.load_pending_orders()[0].cancel_attempts == 1
 
 
-def test_executor_retries_cancel_after_initial_attempt_limit(tmp_path):
+def test_executor_stops_cancel_retries_at_attempt_limit(tmp_path):
     broker = FakeBroker()
     broker.fill_state = "PENDING"
     executor = _executor(tmp_path, broker=broker)
@@ -425,8 +425,9 @@ def test_executor_retries_cancel_after_initial_attempt_limit(tmp_path):
 
     result = executor.reconcile_pending_orders()[0]
 
-    assert result.action == "CANCEL_SUBMITTED"
-    assert len(broker.cancellations) == 1
+    assert result.action == "PENDING"
+    assert len(broker.cancellations) == 0
+    assert executor.store.load_pending_orders()[0].cancel_attempts == executor.config.cancel_max_attempts
 
 
 def test_executor_does_not_cancel_stale_order_when_market_is_closed(tmp_path):

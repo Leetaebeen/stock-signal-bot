@@ -119,7 +119,7 @@ class ExecutionConfig:
     cancel_max_attempts: int = 3
     pending_order_expiry_seconds: int = 12 * 60 * 60
     buying_power_check_enabled: bool = True
-    max_entries_per_market_24h: int = 3
+    max_entries_per_market_24h: int = 1
     kr_max_realized_loss_24h_krw: float = 100_000
     us_max_realized_loss_24h_usd: float = 100
     symbol_reentry_cooldown_seconds: int = 600
@@ -442,17 +442,16 @@ class TradingExecutor:
             return False
         if status.state not in {"PENDING", "PARTIAL", "UNKNOWN"}:
             return False
-        reference_time = pending.cancel_requested_at or pending.submitted_at
-        if reference_time.tzinfo is None:
-            reference_time = reference_time.replace(tzinfo=KST)
-        age_seconds = (datetime.now(KST) - reference_time.astimezone(KST)).total_seconds()
-        retry_seconds = self.config.order_timeout_seconds
         if (
             self.config.cancel_max_attempts > 0
             and pending.cancel_attempts >= self.config.cancel_max_attempts
         ):
-            retry_seconds *= 5
-        return age_seconds >= retry_seconds
+            return False
+        reference_time = pending.cancel_requested_at or pending.submitted_at
+        if reference_time.tzinfo is None:
+            reference_time = reference_time.replace(tzinfo=KST)
+        age_seconds = (datetime.now(KST) - reference_time.astimezone(KST)).total_seconds()
+        return age_seconds >= self.config.order_timeout_seconds
 
     def _request_cancel(
         self,
