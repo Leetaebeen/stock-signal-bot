@@ -87,6 +87,10 @@ class Settings(BaseSettings):
     model_evaluation_hour_kst: int = 17
     model_training_dataset_path: str = "data/training_signals.csv"
     model_output_path: str = "data/momentum_model.json"
+    feature_report_output_path: str = "data/early_surge_report.json"
+    feature_report_min_bucket_samples: int = 30
+    feature_report_min_distinct_days: int = 5
+    feature_report_min_distinct_symbols: int = 5
     us_scan_batch_size: int = 20
     kr_scan_batch_size: int = 10
     us_scan_symbols: str = (

@@ -21,6 +21,7 @@ def test_learning_pipeline_runs_once_after_configured_hour(tmp_path):
     settings = PipelineSettings()
     settings.model_training_dataset_path = str(tmp_path / "training.csv")
     settings.model_output_path = str(tmp_path / "model.json")
+    settings.feature_report_output_path = str(tmp_path / "feature_report.json")
     pipeline = LearningPipeline(settings, TradeJournal(tmp_path / "trades.db"))
 
     before = pipeline.maybe_run(datetime(2026, 7, 27, 16, 59, tzinfo=KST))
@@ -32,8 +33,10 @@ def test_learning_pipeline_runs_once_after_configured_hour(tmp_path):
     assert first.exported_rows == 0
     assert first.report.status == "COLLECTING"
     assert set(first.reports) == {"KR", "US"}
+    assert first.feature_report["source_rows"] == 0
     assert second is None
     assert not (tmp_path / "model.json").exists()
+    assert (tmp_path / "feature_report.json").exists()
 
 
 def test_learning_pipeline_can_be_disabled(tmp_path):
@@ -41,7 +44,9 @@ def test_learning_pipeline_can_be_disabled(tmp_path):
     settings.model_auto_evaluate_enabled = False
     settings.model_training_dataset_path = str(tmp_path / "training.csv")
     settings.model_output_path = str(tmp_path / "model.json")
+    settings.feature_report_output_path = str(tmp_path / "feature_report.json")
     pipeline = LearningPipeline(settings, TradeJournal(tmp_path / "trades.db"))
 
     assert pipeline.maybe_run(datetime(2026, 7, 27, 18, 0, tzinfo=KST)) is None
     assert not (tmp_path / "training.csv").exists()
+    assert not (tmp_path / "feature_report.json").exists()
