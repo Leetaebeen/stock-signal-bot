@@ -2,17 +2,20 @@ import argparse
 
 from app.config import get_settings
 from app.learning.evaluator import evaluate_dataset
+from app.learning.runtime_model import market_model_path
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", default="data/training_signals.csv")
     parser.add_argument("--model-output", default="data/momentum_model.json")
+    parser.add_argument("--market", choices=["KR", "US"], default="US")
+    parser.add_argument("--folds", type=int, default=None)
     args = parser.parse_args()
     settings = get_settings()
     report = evaluate_dataset(
         args.dataset,
-        model_output_path=args.model_output,
+        model_output_path=market_model_path(args.model_output, args.market),
         min_samples=settings.learning_min_labeled_samples,
         min_days=settings.learning_min_distinct_days,
         min_symbols=settings.learning_min_distinct_symbols,
@@ -20,6 +23,8 @@ def main() -> None:
         round_trip_cost_pct=settings.model_round_trip_cost_pct,
         min_precision_pct=settings.model_min_precision_pct,
         min_test_picks=settings.model_min_test_picks,
+        market=args.market,
+        walk_forward_folds=args.folds or settings.model_walk_forward_folds,
     )
     print(f"status={report.status}")
     print(
@@ -29,7 +34,8 @@ def main() -> None:
     if report.status == "EVALUATED":
         print(
             f"train_rows={report.train_rows} test_rows={report.test_rows} "
-            f"test_days={report.test_days}"
+            f"test_days={report.test_days} folds={report.validation_folds} "
+            f"profitable_folds={report.profitable_folds}"
         )
         print(
             f"baseline_precision={report.baseline_precision_pct:.2f}% "

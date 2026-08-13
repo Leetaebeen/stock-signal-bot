@@ -31,6 +31,7 @@ def test_learning_pipeline_runs_once_after_configured_hour(tmp_path):
     assert first is not None
     assert first.exported_rows == 0
     assert first.report.status == "COLLECTING"
+    assert set(first.reports) == {"KR", "US"}
     assert second is None
     assert not (tmp_path / "model.json").exists()
 

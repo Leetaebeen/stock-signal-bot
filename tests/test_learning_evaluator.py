@@ -27,11 +27,13 @@ FIELDS = [
 
 def test_evaluator_blocks_single_day_dataset(tmp_path):
     dataset = tmp_path / "single_day.csv"
+    model_path = tmp_path / "model.json"
     _write_dataset(dataset, days=1, rows_per_day=20)
+    model_path.write_text("stale", encoding="utf-8")
 
     report = evaluate_dataset(
         dataset,
-        model_output_path=tmp_path / "model.json",
+        model_output_path=model_path,
         min_samples=10,
         min_days=5,
         min_symbols=5,
@@ -40,7 +42,7 @@ def test_evaluator_blocks_single_day_dataset(tmp_path):
     assert report.status == "COLLECTING"
     assert report.distinct_days == 1
     assert "days 1/5" in report.reason
-    assert not (tmp_path / "model.json").exists()
+    assert not model_path.exists()
 
 
 def test_evaluator_uses_date_split_and_saves_only_validated_model(tmp_path):
@@ -59,13 +61,32 @@ def test_evaluator_uses_date_split_and_saves_only_validated_model(tmp_path):
     )
 
     assert report.status == "EVALUATED"
-    assert report.train_rows == 192
-    assert report.test_rows == 48
-    assert report.test_days == 4
+    assert report.train_rows == 144
+    assert report.test_rows == 96
+    assert report.test_days == 8
+    assert report.validation_folds == 3
+    assert report.profitable_folds == 3
     assert report.selected_precision_pct == 100
     assert report.eligible_for_runtime
     assert model_path.exists()
     assert len(load_samples(dataset)[0].features) == len(FEATURE_NAMES)
+
+
+def test_evaluator_filters_samples_by_market(tmp_path):
+    dataset = tmp_path / "training.csv"
+    _write_dataset(dataset, days=5, rows_per_day=4)
+
+    report = evaluate_dataset(
+        dataset,
+        min_samples=1,
+        min_days=2,
+        min_symbols=1,
+        market="KR",
+    )
+
+    assert report.status == "COLLECTING"
+    assert report.rows == 0
+    assert report.distinct_days == 0
 
 
 def _write_dataset(path, *, days: int, rows_per_day: int) -> None:

@@ -6,6 +6,7 @@ from app.alerts.telegram import TelegramAlerter
 from app.brokers.kis_client import KisClient
 from app.config import Settings
 from app.learning.pipeline import LearningPipeline
+from app.learning.runtime_model import RuntimeModelGate
 from app.scanners.momentum import (
     MomentumScanner,
     ScanCandidate,
@@ -61,6 +62,14 @@ class TradingRuntime:
         )
         self.journal = TradeJournal(settings.trade_journal_path)
         self.learning = LearningPipeline(settings, self.journal)
+        self.model_gate = RuntimeModelGate(
+            enabled=getattr(settings, "model_runtime_filter_enabled", True),
+            model_output_path=getattr(
+                settings,
+                "model_output_path",
+                "data/momentum_model.json",
+            ),
+        )
         self.executor = TradingExecutor(
             broker=self.client,
             store=self.store,
@@ -167,7 +176,14 @@ class TradingRuntime:
                 self._record_signal(candidate, result)
                 results.append(result)
                 continue
-            result = self.executor.handle_signal(candidate.signal)
+            model_decision = self.model_gate.evaluate(
+                candidate.signal,
+                score=candidate.score,
+            )
+            if not model_decision.allowed:
+                result = ExecutionResult("HOLD", candidate.signal.symbol, model_decision.reason)
+            else:
+                result = self.executor.handle_signal(candidate.signal)
             logger.info("scan result symbol=%s action=%s reason=%s", result.symbol, result.action, result.reason)
             self._record_signal(candidate, result)
             results.append(result)

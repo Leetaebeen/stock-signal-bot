@@ -3,6 +3,7 @@ from datetime import date, datetime
 import logging
 
 from app.learning.evaluator import BacktestReport, evaluate_dataset
+from app.learning.runtime_model import market_model_path
 from app.trading.journal import TradeJournal
 from app.trading.strategy import KST
 
@@ -13,7 +14,11 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class LearningRun:
     exported_rows: int
-    report: BacktestReport
+    reports: dict[str, BacktestReport]
+
+    @property
+    def report(self) -> BacktestReport:
+        return self.reports.get("US") or next(iter(self.reports.values()))
 
 
 class LearningPipeline:
@@ -44,33 +49,42 @@ class LearningPipeline:
             "data/momentum_model.json",
         )
         exported_rows = self.journal.export_training_dataset(dataset_path)
-        report = evaluate_dataset(
-            dataset_path,
-            model_output_path=model_path,
-            min_samples=getattr(self.settings, "learning_min_labeled_samples", 200),
-            min_days=getattr(self.settings, "learning_min_distinct_days", 20),
-            min_symbols=getattr(self.settings, "learning_min_distinct_symbols", 10),
-            target_return_pct=getattr(self.settings, "model_target_return_pct", 0.5),
-            round_trip_cost_pct=getattr(
-                self.settings,
-                "model_round_trip_cost_pct",
-                0.2,
-            ),
-            min_precision_pct=getattr(
-                self.settings,
-                "model_min_precision_pct",
-                55.0,
-            ),
-            min_test_picks=getattr(self.settings, "model_min_test_picks", 20),
-        )
+        reports = {}
+        for market in ("KR", "US"):
+            report = evaluate_dataset(
+                dataset_path,
+                model_output_path=market_model_path(model_path, market),
+                min_samples=getattr(self.settings, "learning_min_labeled_samples", 200),
+                min_days=getattr(self.settings, "learning_min_distinct_days", 20),
+                min_symbols=getattr(self.settings, "learning_min_distinct_symbols", 10),
+                target_return_pct=getattr(self.settings, "model_target_return_pct", 0.5),
+                round_trip_cost_pct=getattr(
+                    self.settings,
+                    "model_round_trip_cost_pct",
+                    0.2,
+                ),
+                min_precision_pct=getattr(
+                    self.settings,
+                    "model_min_precision_pct",
+                    55.0,
+                ),
+                min_test_picks=getattr(self.settings, "model_min_test_picks", 20),
+                market=market,
+                walk_forward_folds=getattr(self.settings, "model_walk_forward_folds", 3),
+            )
+            reports[market] = report
+            logger.info(
+                "learning evaluation market=%s status=%s rows=%s days=%s symbols=%s "
+                "folds=%s profitable_folds=%s eligible=%s reason=%s",
+                market,
+                report.status,
+                report.rows,
+                report.distinct_days,
+                report.distinct_symbols,
+                report.validation_folds,
+                report.profitable_folds,
+                report.eligible_for_runtime,
+                report.reason,
+            )
         self._last_run_date = current.date()
-        logger.info(
-            "learning evaluation status=%s rows=%s days=%s symbols=%s eligible=%s reason=%s",
-            report.status,
-            report.rows,
-            report.distinct_days,
-            report.distinct_symbols,
-            report.eligible_for_runtime,
-            report.reason,
-        )
-        return LearningRun(exported_rows, report)
+        return LearningRun(exported_rows, reports)

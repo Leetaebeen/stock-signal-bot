@@ -69,6 +69,8 @@ class BacktestReport:
     selected_precision_pct: float = 0.0
     selected_average_return_pct: float = 0.0
     selected_average_net_return_pct: float = 0.0
+    validation_folds: int = 0
+    profitable_folds: int = 0
     eligible_for_runtime: bool = False
     reason: str = ""
 
@@ -85,8 +87,13 @@ def evaluate_dataset(
     min_precision_pct: float = 55.0,
     min_test_picks: int = 20,
     probability_threshold: float = 0.6,
+    market: str | None = None,
+    walk_forward_folds: int = 3,
 ) -> BacktestReport:
     samples = load_samples(dataset_path)
+    normalized_market = market.strip().upper() if market else None
+    if normalized_market:
+        samples = [item for item in samples if item.market == normalized_market]
     dates = sorted({item.observed_date for item in samples})
     symbols = {item.symbol for item in samples}
     reasons = []
@@ -96,7 +103,10 @@ def evaluate_dataset(
         reasons.append(f"days {len(dates)}/{min_days}")
     if len(symbols) < min_symbols:
         reasons.append(f"symbols {len(symbols)}/{min_symbols}")
+    if len(dates) < 2:
+        reasons.append("at least 2 dates required")
     if reasons:
+        _remove_model(model_output_path)
         return BacktestReport(
             status="COLLECTING",
             rows=len(samples),
@@ -105,26 +115,38 @@ def evaluate_dataset(
             reason=", ".join(reasons),
         )
 
-    split_index = min(max(int(len(dates) * 0.8), 1), len(dates) - 1)
-    train_dates = set(dates[:split_index])
-    test_dates = set(dates[split_index:])
-    train = [item for item in samples if item.observed_date in train_dates]
-    test = [item for item in samples if item.observed_date in test_dates]
-    model = train_logistic_model(
-        train,
-        target_return_pct=target_return_pct,
-        probability_threshold=probability_threshold,
+    initial_train_days = min(max(int(len(dates) * 0.6), 1), len(dates) - 1)
+    initial_train_date_set = set(dates[:initial_train_days])
+    validation_groups = _chunk_dates(
+        dates[initial_train_days:],
+        max(int(walk_forward_folds), 1),
     )
-    selected = [
-        item
-        for item in test
-        if model.predict_probability(item.features) >= model.threshold
-    ]
-    positives = sum(item.return_30m >= target_return_pct for item in test)
-    selected_positives = sum(
-        item.return_30m >= target_return_pct
-        for item in selected
-    )
+    selected: list[TrainingSample] = []
+    validation: list[TrainingSample] = []
+    profitable_folds = 0
+    for validation_dates in validation_groups:
+        first_validation_date = min(validation_dates)
+        train = [item for item in samples if item.observed_date < first_validation_date]
+        test = [item for item in samples if item.observed_date in validation_dates]
+        model = train_logistic_model(
+            train,
+            target_return_pct=target_return_pct,
+            probability_threshold=probability_threshold,
+        )
+        fold_selected = [
+            item
+            for item in test
+            if model.predict_probability(item.features) >= model.threshold
+        ]
+        validation.extend(test)
+        selected.extend(fold_selected)
+        if fold_selected:
+            fold_average = sum(item.return_30m for item in fold_selected) / len(fold_selected)
+            if fold_average - round_trip_cost_pct > 0:
+                profitable_folds += 1
+
+    positives = sum(item.return_30m >= target_return_pct for item in validation)
+    selected_positives = sum(item.return_30m >= target_return_pct for item in selected)
     precision = (selected_positives / len(selected) * 100) if selected else 0.0
     average_return = (
         sum(item.return_30m for item in selected) / len(selected)
@@ -136,20 +158,23 @@ def evaluate_dataset(
         len(selected) >= min_test_picks
         and precision >= min_precision_pct
         and average_net_return > 0
+        and profitable_folds >= math.ceil(len(validation_groups) * (2 / 3))
     )
     report = BacktestReport(
         status="EVALUATED",
         rows=len(samples),
         distinct_days=len(dates),
         distinct_symbols=len(symbols),
-        train_rows=len(train),
-        test_rows=len(test),
-        test_days=len(test_dates),
-        baseline_precision_pct=(positives / len(test) * 100) if test else 0.0,
+        train_rows=sum(item.observed_date in initial_train_date_set for item in samples),
+        test_rows=len(validation),
+        test_days=sum(len(group) for group in validation_groups),
+        baseline_precision_pct=(positives / len(validation) * 100) if validation else 0.0,
         selected_picks=len(selected),
         selected_precision_pct=precision,
         selected_average_return_pct=average_return,
         selected_average_net_return_pct=average_net_return,
+        validation_folds=len(validation_groups),
+        profitable_folds=profitable_folds,
         eligible_for_runtime=eligible,
         reason=(
             "validation criteria passed"
@@ -158,12 +183,18 @@ def evaluate_dataset(
         ),
     )
     if eligible and model_output_path:
+        final_model = train_logistic_model(
+            samples,
+            target_return_pct=target_return_pct,
+            probability_threshold=probability_threshold,
+        )
         destination = Path(model_output_path)
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(
             json.dumps(
                 {
-                    "model": model.as_json(),
+                    "market": normalized_market,
+                    "model": final_model.as_json(),
                     "target_return_pct": target_return_pct,
                     "round_trip_cost_pct": round_trip_cost_pct,
                     "report": asdict(report),
@@ -173,7 +204,28 @@ def evaluate_dataset(
             ),
             encoding="utf-8",
         )
+    elif model_output_path:
+        _remove_model(model_output_path)
     return report
+
+
+def _chunk_dates(dates: list[str], requested_chunks: int) -> list[set[str]]:
+    if not dates:
+        return []
+    chunk_count = min(max(requested_chunks, 1), len(dates))
+    base_size, remainder = divmod(len(dates), chunk_count)
+    chunks = []
+    cursor = 0
+    for index in range(chunk_count):
+        size = base_size + (1 if index < remainder else 0)
+        chunks.append(set(dates[cursor : cursor + size]))
+        cursor += size
+    return chunks
+
+
+def _remove_model(model_output_path: str | Path | None) -> None:
+    if model_output_path:
+        Path(model_output_path).unlink(missing_ok=True)
 
 
 def load_samples(dataset_path: str | Path) -> list[TrainingSample]:
